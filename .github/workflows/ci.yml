@@ -1,0 +1,87 @@
+name: CI Quality Gate
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  backend-checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tosh_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install ruff mypy pytest-cov pytest-asyncio httpx
+
+      - name: Run Ruff Linter
+        working-directory: ./backend
+        run: ruff check app tests
+
+      - name: Run Mypy Type Checker
+        working-directory: ./backend
+        run: mypy app
+
+      - name: Run Alembic Migration Check
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/tosh_test
+          DATABASE_SYNC_URL: postgresql://postgres:postgres@localhost:5432/tosh_test
+        run: |
+          alembic upgrade head
+          alembic check
+
+      - name: Run Pytest with Coverage
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/tosh_test
+          DATABASE_SYNC_URL: postgresql://postgres:postgres@localhost:5432/tosh_test
+        run: pytest -v --cov=app/services --cov-report=term-missing
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build

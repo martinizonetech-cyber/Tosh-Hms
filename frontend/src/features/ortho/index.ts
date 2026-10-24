@@ -1,0 +1,11 @@
+﻿export { OrthoDashboard } from './OrthoDashboard';
+export { OrthoAppointmentsPage } from './OrthoAppointmentsPage';
+export { OrthoPatientsPage } from './OrthoPatientsPage';
+export { OrthoConsultationPage } from './OrthoConsultationPage';
+export { BodyRegionTemplatesPage } from './BodyRegionTemplatesPage';
+export { OrthoChargesPage } from './OrthoChargesPage';
+export { OrthoPrescriptionsPage } from './OrthoPrescriptionsPage';
+export { OrthoTreatmentsPage } from './OrthoTreatmentsPage';
+export { OrthoFollowUpsPage } from './OrthoFollowUpsPage';
+export { OrthoReportsPage } from './OrthoReportsPage';
+export { OrthoHistoryPage } from './OrthoHistoryPage';

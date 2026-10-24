@@ -1,0 +1,10 @@
+﻿export { SkinDashboard } from './SkinDashboard';
+export { SkinAppointmentsPage } from './SkinAppointmentsPage';
+export { SkinPatientsPage } from './SkinPatientsPage';
+export { SkinConsultationPage } from './SkinConsultationPage';
+export { SkinChargesPage } from './SkinChargesPage';
+export { SkinPrescriptionsPage } from './SkinPrescriptionsPage';
+export { SkinTreatmentsPage } from './SkinTreatmentsPage';
+export { SkinFollowUpsPage } from './SkinFollowUpsPage';
+export { SkinReportsPage } from './SkinReportsPage';
+export { SkinHistoryPage } from './SkinHistoryPage';
