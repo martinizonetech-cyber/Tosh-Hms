@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Activity, CalendarDays, FileText, Printer, Search, Stethoscope, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import type { Consultation, Department } from '../../types/domain';
+import type { Consultation, Department, Patient } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';
 import { dateLabel, departmentLabel, isSameISODate, matchesDateSearch, money, resolveDocumentUrl } from '../../utils/format';
 import { PageHeading, PatientAvatar } from '../../components/shared/Primitives';
@@ -182,6 +182,7 @@ export function DoctorPrescriptionsPage({ department }: { department: Department
       {selected && (
         <section className="doctor-rx-print">
           <PrescriptionDocument
+            patient={patient}
             patientName={patient?.fullName ?? 'Patient'}
             patientId={patient?.id ?? selected.patientId}
             department={department}
@@ -194,22 +195,24 @@ export function DoctorPrescriptionsPage({ department }: { department: Department
 }
 
 function PrescriptionDocument({
+  patient,
   patientName,
   patientId,
   department,
   visit,
 }: {
+  patient?: Patient | null;
   patientName: string;
   patientId: string;
   department: Department;
   visit: Consultation;
 }) {
   const doctorName = department === 'skin' ? 'Dr. Sangamitra' : 'Dr. Sundarprakash';
-  const dummyPatient = {
+  const displayPatient = patient || {
     id: patientId,
     fullName: patientName,
     gender: 'Patient',
-    address: 'Pune, Maharashtra',
+    address: '—',
   };
 
   return (
@@ -221,7 +224,7 @@ function PrescriptionDocument({
       />
 
       <PrintPatientMeta
-        patient={dummyPatient}
+        patient={displayPatient}
         visitedAt={visit.visitedAt}
         doctorName={doctorName}
         tokenOrVisitLabel="OPD Prescription Record"
@@ -337,7 +340,7 @@ export function DoctorTreatmentsPage({ department }: { department: Department })
             </span>
           </div>
           <div className="stat-value">{money(total)}</div>
-          <div className="stat-foot">Fictional demo amount</div>
+          <div className="stat-foot">Total billed procedures</div>
         </div>
       </div>
       <Card padded={false}>

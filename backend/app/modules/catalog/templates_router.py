@@ -41,20 +41,6 @@ async def get_body_region_templates(
     res = await db.execute(stmt)
     templates = res.scalars().all()
 
-    if not templates:
-        from app.scripts.seed import BODY_REGION_TEMPLATES
-        for seed_t in BODY_REGION_TEMPLATES:
-            obj = BodyRegionTemplate(
-                region=seed_t["region"],  # type: ignore[arg-type]
-                fields=seed_t["fields"],  # type: ignore[arg-type]
-                medications=seed_t["medications"],  # type: ignore[arg-type]
-            )
-            db.add(obj)
-        await db.commit()
-        stmt = select(BodyRegionTemplate).order_by(BodyRegionTemplate.region.asc())
-        res = await db.execute(stmt)
-        templates = res.scalars().all()
-
     output = []
     for tmpl in templates:
         output.append(

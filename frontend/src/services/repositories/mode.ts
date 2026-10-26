@@ -1,8 +1,8 @@
 export type DataMode = 'mock' | 'api';
 
 const configuredMode = import.meta.env.VITE_DATA_MODE;
-export const DATA_MODE: DataMode = configuredMode === 'api' ? 'api' : 'mock';
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+export const DATA_MODE: DataMode = configuredMode === 'mock' ? 'mock' : 'api';
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api/v1').replace(/\/$/, '');
 
 export class DemoModeRequiredError extends Error {
   constructor() {

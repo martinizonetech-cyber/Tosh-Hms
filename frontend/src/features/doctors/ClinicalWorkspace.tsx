@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { CheckCheck, ClipboardList, FileText, Printer, Save, Stethoscope } from 'lucide-react';
+import { Check, CheckCheck, ClipboardList, Edit2, FileText, Printer, Save, Stethoscope } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Consultation, Department } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';
@@ -17,7 +17,6 @@ import { PrescriptionPanel } from './clinical/PrescriptionPanel';
 import { DocumentsPanel } from './clinical/DocumentsPanel';
 import { ProceduresPanel } from './clinical/ProceduresPanel';
 import { DoctorFollowUpPanel } from './clinical/DoctorFollowUpPanel';
-import { BodyRegionTemplatesPanel } from './clinical/BodyRegionTemplatesPanel';
 import { PrintLetterhead, PrintPatientMeta, PrintVitalsPanel, PrintRxTable, PrintDoctorSignatureBlock } from '../../components/shared/PrintTemplates';
 
 const tabs = ['Clinical notes', 'Prescription', 'Documents', 'Procedures', 'Follow-up'] as const;
@@ -48,6 +47,7 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
   const missingVisitId = visitIdSupplied && !visitLinkMismatch && !visitCandidate ? queueVisitId : undefined;
   const [clinical, setClinical] = useState<Consultation>(() => patient ? savedVisit ?? blankVisit(patient.id, department, missingVisitId) : blankVisit('', department));
   const [tab, setTab] = useState<Tab>('Clinical notes');
+  const [editingVitals, setEditingVitals] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [conflictError, setConflictError] = useState(false);
   const [isLocked, setIsLocked] = useState(clinical.status === 'Finalized');
@@ -78,8 +78,8 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
     }
   }, [selectedPatientId, selectedQueue?.id, selectedQueue?.visitId, savedVisit?.id, missingVisitId]);
 
-  if (visitLinkMismatch) return <><PageHeading eyebrow={`${departmentLabel(department)} · Visit integrity`} title="Visit link needs review" description="No consultation from another patient or department was opened." /><Card><EmptyState title="Visit ID does not match this patient" message="The queue entry has an empty visit ID or points to a consultation assigned to a different patient or department. No changes were made. Reset the fictional demo records in Reception Settings, then reopen this visit." icon={<ClipboardList size={18} />} /></Card></>;
-  if (!patient || !selectedPatientId) return <><PageHeading eyebrow={`${departmentLabel(department)} · Consultation`} title="Consultation workspace" description="Select a patient to begin a clinical record." /><Card><EmptyState title="No department patients yet" message="Register or schedule a fictional patient from Reception to start a consultation." icon={<Stethoscope size={18} />} action={<Button onClick={() => navigate('/reception/patients')}>Open patient directory</Button>} /></Card></>;
+  if (visitLinkMismatch) return <><PageHeading eyebrow={`${departmentLabel(department)} · Visit integrity`} title="Visit link needs review" description="No consultation from another patient or department was opened." /><Card><EmptyState title="Visit ID does not match this patient" message="The queue entry has an invalid visit ID or points to a consultation assigned to a different patient or department." icon={<ClipboardList size={18} />} /></Card></>;
+  if (!patient || !selectedPatientId) return <><PageHeading eyebrow={`${departmentLabel(department)} · Consultation`} title="Consultation workspace" description="Select a patient to begin a clinical record." /><Card><EmptyState title="No department patients yet" message="Register or schedule a patient from Reception to start a consultation." icon={<Stethoscope size={18} />} action={<Button onClick={() => navigate('/reception/patients')}>Open patient directory</Button>} /></Card></>;
 
   const patch = (update: Partial<Consultation>) => {
     if (isLocked) {
@@ -170,16 +170,115 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
     <div className="doctor-workspace">
       <aside className="stack sticky-card">
         <Card><SectionHeading title="Patient overview" action={<span className="clinical-summary-tag"><FileText size={14} /><Badge tone={clinical.status === 'Finalized' ? 'success' : 'warn'}>{clinical.status}</Badge></span>} /><div className="clinical-patient-name"><PatientAvatar name={patient.fullName} /><div><strong>{patient.fullName}</strong><span>{patient.id}</span></div></div><div className="profile-grid compact-profile"><div className="profile-info"><span>Age / gender</span><strong>{getAge(patient.dateOfBirth) ?? '—'} years · {patient.gender}</strong></div><div className="profile-info"><span>Phone</span><strong>{patient.phone}</strong></div><div className="profile-info"><span>Department</span><strong>{departmentLabel(department)}</strong></div><div className="profile-info"><span>Latest visit</span><strong>{patient.latestVisitAt ? formatDistanceToNow(new Date(patient.latestVisitAt), { addSuffix: true }) : 'First visit'}</strong></div></div><div className="field" style={{ marginTop: 13 }}><label htmlFor="consult-patient">Switch patient</label><select id="consult-patient" className="control" value={patient.id} onChange={(event) => changePatient(event.target.value)}>{patients.map((entry) => <option key={entry.id} value={entry.id}>{entry.fullName} · {entry.id}</option>)}</select></div></Card>
-        <Card><SectionHeading title="Reception-entered vitals" subtitle="Review or edit demo measurements in Clinical notes." /><div className="vitals-grid">{[['BP', clinical.vitals.bloodPressure], ['Pulse', clinical.vitals.pulse], ['Temp', clinical.vitals.temperature], ['Height', clinical.vitals.height], ['Weight', clinical.vitals.weight], ['SpO₂', clinical.vitals.oxygenSaturation]].map(([label, value]) => <div className="vital-tile" key={label}><span>{label}</span><strong>{value || '—'}</strong></div>)}</div></Card>
-        <Card><SectionHeading title="Visit context" /><div className="metric-list"><div className="metric-line"><span>Allergies</span><strong>{clinical.allergies || 'Not recorded'}</strong></div><div className="metric-line"><span>Next appointment</span><strong>{nextAppointment ? dateLabel(nextAppointment.startsAt, 'd MMM · h:mm a') : 'None scheduled'}</strong></div><div className="metric-line"><span>Follow-up</span><strong>{clinical.followUpDate ? dateLabel(`${clinical.followUpDate}T00:00:00`) : 'Not set'}</strong></div></div></Card>
-        {department === 'orthopaedics' && (
-          <BodyRegionTemplatesPanel
-            consultation={clinical}
-            onChange={patch}
-            onPrintPrescription={() => print('prescription')}
-            onSelectTab={(tabName) => setTab(tabName as any)}
+        <Card>
+          <SectionHeading
+            title="Reception-entered vitals"
+            subtitle="Recorded at reception; doctor can review & edit."
+            action={
+              <Button
+                size="small"
+                variant="ghost"
+                type="button"
+                onClick={() => setEditingVitals(!editingVitals)}
+                icon={editingVitals ? <Check size={13} /> : <Edit2 size={13} />}
+              >
+                {editingVitals ? 'Done' : 'Edit'}
+              </Button>
+            }
           />
-        )}
+          {!editingVitals ? (
+            <div
+              className="vitals-grid"
+              onClick={() => setEditingVitals(true)}
+              title="Click to edit vitals"
+              style={{ cursor: 'pointer' }}
+            >
+              {[
+                ['BP', clinical.vitals.bloodPressure],
+                ['Pulse', clinical.vitals.pulse],
+                ['Temp', clinical.vitals.temperature],
+                ['Height', clinical.vitals.height],
+                ['Weight', clinical.vitals.weight],
+                ['SpO₂', clinical.vitals.oxygenSaturation],
+              ].map(([label, value]) => (
+                <div className="vital-tile" key={label}>
+                  <span>{label}</span>
+                  <strong>{value || '—'}</strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="form-grid two" style={{ gap: '6px' }}>
+              <div className="field">
+                <label style={{ fontSize: '10px', color: 'var(--muted)', display: 'block', marginBottom: '2px' }}>Blood pressure</label>
+                <input
+                  id="workspace-vital-bp"
+                  className="control"
+                  style={{ padding: '3px 6px', fontSize: '11px', height: '28px' }}
+                  placeholder="e.g. 118/76"
+                  value={clinical.vitals.bloodPressure}
+                  onChange={(e) => patch({ vitals: { ...clinical.vitals, bloodPressure: e.target.value } })}
+                />
+              </div>
+              <div className="field">
+                <label style={{ fontSize: '10px', color: 'var(--muted)', display: 'block', marginBottom: '2px' }}>Pulse</label>
+                <input
+                  id="workspace-vital-pulse"
+                  className="control"
+                  style={{ padding: '3px 6px', fontSize: '11px', height: '28px' }}
+                  placeholder="e.g. 72 bpm"
+                  value={clinical.vitals.pulse}
+                  onChange={(e) => patch({ vitals: { ...clinical.vitals, pulse: e.target.value } })}
+                />
+              </div>
+              <div className="field">
+                <label style={{ fontSize: '10px', color: 'var(--muted)', display: 'block', marginBottom: '2px' }}>Temperature</label>
+                <input
+                  id="workspace-vital-temp"
+                  className="control"
+                  style={{ padding: '3px 6px', fontSize: '11px', height: '28px' }}
+                  placeholder="e.g. 36.8 °C"
+                  value={clinical.vitals.temperature}
+                  onChange={(e) => patch({ vitals: { ...clinical.vitals, temperature: e.target.value } })}
+                />
+              </div>
+              <div className="field">
+                <label style={{ fontSize: '10px', color: 'var(--muted)', display: 'block', marginBottom: '2px' }}>SpO₂</label>
+                <input
+                  id="workspace-vital-spo2"
+                  className="control"
+                  style={{ padding: '3px 6px', fontSize: '11px', height: '28px' }}
+                  placeholder="e.g. 98%"
+                  value={clinical.vitals.oxygenSaturation}
+                  onChange={(e) => patch({ vitals: { ...clinical.vitals, oxygenSaturation: e.target.value } })}
+                />
+              </div>
+              <div className="field">
+                <label style={{ fontSize: '10px', color: 'var(--muted)', display: 'block', marginBottom: '2px' }}>Height</label>
+                <input
+                  id="workspace-vital-height"
+                  className="control"
+                  style={{ padding: '3px 6px', fontSize: '11px', height: '28px' }}
+                  placeholder="e.g. 168 cm"
+                  value={clinical.vitals.height}
+                  onChange={(e) => patch({ vitals: { ...clinical.vitals, height: e.target.value } })}
+                />
+              </div>
+              <div className="field">
+                <label style={{ fontSize: '10px', color: 'var(--muted)', display: 'block', marginBottom: '2px' }}>Weight</label>
+                <input
+                  id="workspace-vital-weight"
+                  className="control"
+                  style={{ padding: '3px 6px', fontSize: '11px', height: '28px' }}
+                  placeholder="e.g. 64 kg"
+                  value={clinical.vitals.weight}
+                  onChange={(e) => patch({ vitals: { ...clinical.vitals, weight: e.target.value } })}
+                />
+              </div>
+            </div>
+          )}
+        </Card>
+        <Card><SectionHeading title="Visit context" /><div className="metric-list"><div className="metric-line"><span>Allergies</span><strong>{clinical.allergies || 'Not recorded'}</strong></div><div className="metric-line"><span>Next appointment</span><strong>{nextAppointment ? dateLabel(nextAppointment.startsAt, 'd MMM · h:mm a') : 'None scheduled'}</strong></div><div className="metric-line"><span>Follow-up</span><strong>{clinical.followUpDate ? dateLabel(`${clinical.followUpDate}T00:00:00`) : 'Not set'}</strong></div></div></Card>
       </aside>
       <section className="clinical-main">
         <Tabs idPrefix="clinical" ariaLabel="Consultation sections" items={tabOptions} selected={tab} onChange={setTab} className="clinical-tabs" />

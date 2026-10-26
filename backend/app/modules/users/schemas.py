@@ -7,3 +7,4 @@ class DoctorPublic(CamelModel):
     id: uuid.UUID
     display_name: str
     department: str
+    email: str | None = None

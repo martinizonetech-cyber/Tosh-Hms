@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CreditCard, Edit2, Plus, RotateCcw, Search, Syringe, Tag, Trash2, X } from 'lucide-react';
 import type { Department } from '../../types/domain';
 import { money } from '../../utils/format';
@@ -12,7 +12,9 @@ import { TablePagination, usePagination } from '../../components/ui/Pagination';
 import { useToast } from '../../components/ui/Toast';
 import type { ClinicChargeItem } from '../../services/charges/chargesService';
 import {
+  CHARGES_UPDATED_EVENT,
   deleteClinicCharge,
+  fetchClinicCharges,
   getClinicCharges,
   resetClinicCharges,
   saveClinicCharge,
@@ -23,6 +25,32 @@ export function DoctorChargesPage({ department }: { department: Department }) {
   const [charges, setCharges] = useState<ClinicChargeItem[]>(() => getClinicCharges());
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+
+  // Sync charges from API on mount
+  useEffect(() => {
+    let mounted = true;
+    fetchClinicCharges()
+      .then((items) => {
+        if (mounted && Array.isArray(items)) {
+          setCharges(items);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Listen for charges updates across components/tabs
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (Array.isArray(e.detail)) {
+        setCharges(e.detail);
+      }
+    };
+    window.addEventListener(CHARGES_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(CHARGES_UPDATED_EVENT, handler);
+  }, []);
 
   // Add / Edit Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -69,7 +97,7 @@ export function DoctorChargesPage({ department }: { department: Department }) {
     setIsModalOpen(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) {
       toast.push('Please enter product / service name.', 'error');
@@ -90,15 +118,15 @@ export function DoctorChargesPage({ department }: { department: Department }) {
       department: department,
     };
 
-    saveClinicCharge(itemToSave);
+    await saveClinicCharge(itemToSave);
     refresh();
     setIsModalOpen(false);
     toast.push(editingItem ? `Updated "${itemToSave.name}" successfully.` : `Added "${itemToSave.name}" to Charges.`);
   };
 
-  const handleDelete = (item: ClinicChargeItem) => {
+  const handleDelete = async (item: ClinicChargeItem) => {
     if (!window.confirm(`Delete "${item.name}" from charges master?`)) return;
-    deleteClinicCharge(item.id);
+    await deleteClinicCharge(item.id);
     refresh();
     toast.push(`Deleted "${item.name}".`);
   };

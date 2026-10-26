@@ -7,6 +7,7 @@ export interface ClinicChargeItem {
   department?: 'skin' | 'orthopaedics' | 'all';
 }
 
+export const CHARGES_UPDATED_EVENT = 'tosh-clinic-charges-updated';
 const STORAGE_KEY = 'carehub_clinic_charges_master';
 
 const defaultCharges: ClinicChargeItem[] = [
@@ -43,58 +44,56 @@ let cachedApiCharges: ClinicChargeItem[] | null = null;
 
 export async function fetchClinicCharges(): Promise<ClinicChargeItem[]> {
   if (DATA_MODE === 'api') {
-    const items = await requestJson<any[]>('/catalog/charges');
-    const mapped: ClinicChargeItem[] = items.map((c) => ({
-      id: c.displayId || c.id,
-      name: c.name,
-      category: c.category,
-      price: c.price,
-      unit: c.unit,
-      department: c.department,
-    }));
-    cachedApiCharges = mapped;
-    return mapped;
+    try {
+      const items = await requestJson<any[]>('/catalog/charges');
+      if (Array.isArray(items)) {
+        const mapped: ClinicChargeItem[] = items.map((c) => ({
+          id: c.displayId || c.id,
+          name: c.name,
+          category: c.category,
+          price: c.price,
+          unit: c.unit,
+          department: c.department,
+        }));
+        cachedApiCharges = mapped;
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(mapped));
+          window.dispatchEvent(new CustomEvent(CHARGES_UPDATED_EVENT, { detail: mapped }));
+        }
+        return mapped;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch charges from API, using cached or fallback charges', err);
+    }
   }
   return getClinicCharges();
 }
 
 export function getClinicCharges(): ClinicChargeItem[] {
+  if (cachedApiCharges !== null) {
+    return cachedApiCharges;
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          cachedApiCharges = parsed;
+          return parsed;
+        }
+      }
+    } catch {
+      // Proceed to default fallback
+    }
+  }
   if (DATA_MODE === 'api') {
-    return cachedApiCharges || [];
+    return [];
   }
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultCharges));
-      return defaultCharges;
-    }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
-    }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultCharges));
-    return defaultCharges;
-  } catch {
-    return defaultCharges;
-  }
+  return defaultCharges;
 }
 
-export function saveClinicCharge(charge: ClinicChargeItem): void {
-  if (DATA_MODE === 'api') {
-    requestJson('/catalog/charges', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: charge.name,
-        category: charge.category,
-        price: charge.price,
-        unit: charge.unit || '',
-        department: charge.department || 'all',
-      }),
-    })
-      .then(() => fetchClinicCharges())
-      .catch((err) => console.error('Failed to save charge to catalog API', err));
-    return;
-  }
+export async function saveClinicCharge(charge: ClinicChargeItem): Promise<void> {
   const current = getClinicCharges();
   const existingIndex = current.findIndex((c) => c.id === charge.id);
   let updated: ClinicChargeItem[];
@@ -103,25 +102,70 @@ export function saveClinicCharge(charge: ClinicChargeItem): void {
   } else {
     updated = [charge, ...current];
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  cachedApiCharges = updated;
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent(CHARGES_UPDATED_EVENT, { detail: updated }));
+  }
+
+  if (DATA_MODE === 'api') {
+    try {
+      if (existingIndex >= 0) {
+        await requestJson(`/catalog/charges/${encodeURIComponent(charge.id)}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: charge.name,
+            category: charge.category,
+            price: charge.price,
+            unit: charge.unit || '',
+            department: charge.department || 'all',
+          }),
+        });
+      } else {
+        await requestJson('/catalog/charges', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: charge.name,
+            category: charge.category,
+            price: charge.price,
+            unit: charge.unit || '',
+            department: charge.department || 'all',
+          }),
+        });
+      }
+      await fetchClinicCharges();
+    } catch (err) {
+      console.warn('API sync for charge save failed (item preserved in local storage):', err);
+      throw err;
+    }
+  }
 }
 
-export function deleteClinicCharge(id: string): void {
-  if (DATA_MODE === 'api') {
-    requestJson(`/catalog/charges/${encodeURIComponent(id)}`, { method: 'DELETE' })
-      .then(() => fetchClinicCharges())
-      .catch((err) => console.error('Failed to delete charge from catalog API', err));
-    return;
-  }
+export async function deleteClinicCharge(id: string): Promise<void> {
   const current = getClinicCharges();
   const updated = current.filter((c) => c.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  cachedApiCharges = updated;
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent(CHARGES_UPDATED_EVENT, { detail: updated }));
+  }
+
+  if (DATA_MODE === 'api') {
+    try {
+      await requestJson(`/catalog/charges/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await fetchClinicCharges();
+    } catch (err) {
+      console.warn('API sync for charge delete failed (item removed locally):', err);
+      throw err;
+    }
+  }
 }
 
 export function resetClinicCharges(): ClinicChargeItem[] {
-  if (DATA_MODE === 'api') {
-    return cachedApiCharges || [];
+  cachedApiCharges = [...defaultCharges];
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultCharges));
+    window.dispatchEvent(new CustomEvent(CHARGES_UPDATED_EVENT, { detail: defaultCharges }));
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultCharges));
   return defaultCharges;
 }

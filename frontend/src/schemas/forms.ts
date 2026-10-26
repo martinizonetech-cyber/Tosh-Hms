@@ -16,7 +16,7 @@ export const patientSchema = z.object({
 export const appointmentSchema = z.object({
   patientId: z.string().min(1, 'Select a patient.'),
   department: z.enum(['skin', 'orthopaedics']),
-  doctor: z.string().min(1, 'Select a doctor.'),
+  doctor: z.string().optional(),
   startsAt: z.string().min(1, 'Choose a date and time.'),
   visitType: z.enum(['New', 'Follow-up', 'Walk-in']),
   note: z.string().max(240, 'Keep the visit note under 240 characters.').optional(),
@@ -30,10 +30,10 @@ export const paymentSchema = z.object({
 
 export const prescriptionSchema = z.object({
   medicineName: z.string().trim().min(1, 'Enter the medicine name.'),
-  strength: z.string().trim().min(1, 'Enter the strength or mark as clinician-directed.'),
-  dosage: z.string().trim().min(1, 'Enter the dosage.'),
-  route: z.string().trim().min(1, 'Enter the route.'),
-  frequency: z.string().trim().min(1, 'Enter the frequency.'),
-  duration: z.string().trim().min(1, 'Enter the duration.'),
+  strength: z.string().trim().min(1, 'Enter the strength/dosage (e.g. 1%, 500mg).'),
+  dosage: z.string().trim().min(1, 'Enter or select the dosage form (e.g. Cream, Tablet).'),
+  route: z.string().trim().min(1, 'Enter or select the route (e.g. Topical, Oral).'),
+  frequency: z.string().trim().min(1, 'Enter or select the frequency (e.g. Twice daily).'),
+  duration: z.string().trim().min(1, 'Enter or select the duration (e.g. 7 days).'),
   instructions: z.string().max(240).optional(),
 });

@@ -4,6 +4,7 @@ import { Activity, ArrowRight, CalendarDays, CheckCheck, Clock3, CreditCard, Use
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { useHospitalData } from '../../services/mock/DemoProvider';
+import { useAuth } from '../../services/auth/AuthContext';
 import { money, timeLabel } from '../../utils/format';
 import { Badge, statusTone } from '../../components/ui/Badge';
 import { Card, SectionHeading, StatCard } from '../../components/ui/Card';
@@ -13,6 +14,7 @@ import { TablePagination, usePagination } from '../../components/ui/Pagination';
 
 export function ReceptionDashboard() {
   const { state } = useHospitalData();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const today = startOfDay(new Date());
   const todayAppointments = state.appointments.filter((item) => isSameDay(new Date(item.startsAt), today));
@@ -39,19 +41,19 @@ export function ReceptionDashboard() {
   const { page, setPage, pageSize, setPageSize, pagedItems: pagedAgenda, total: agendaTotal } = usePagination(agenda, 5);
   const metrics = [
     { label: "Today's appointments", value: todayAppointments.length, hint: 'Across both departments', icon: <CalendarDays size={16} /> },
-    { label: 'Waiting patients', value: waiting.length, hint: 'Queue is live in demo mode', icon: <Clock3 size={16} /> },
+    { label: 'Waiting patients', value: waiting.length, hint: 'Current waiting queue', icon: <Clock3 size={16} /> },
     { label: 'Currently consulting', value: consulting.length, hint: 'Patients with a clinician', icon: <Activity size={16} /> },
     { label: 'Completed visits', value: completed, hint: 'Queue visits marked complete', icon: <CheckCheck size={16} /> },
     { label: "Today's collections", value: money(collections), hint: 'Recorded payments today', icon: <Wallet size={16} /> },
-    { label: 'Outstanding balances', value: money(outstanding), hint: 'Across open demo invoices', icon: <CreditCard size={16} /> },
+    { label: 'Outstanding balances', value: money(outstanding), hint: 'Across open invoices', icon: <CreditCard size={16} /> },
     { label: 'Follow-ups due soon', value: followUpsDue, hint: 'Due today or in the next two days', icon: <Users size={16} /> },
     { label: 'Departments active', value: 2, hint: 'Skin and Orthopaedics', icon: <Activity size={16} /> },
   ];
   return <>
-    <PageHeading eyebrow="Reception · Overview" title="Good morning, Priya" description="A clear view of today’s appointments, queue and collections." actions={<Button onClick={() => navigate('/reception/queue')} icon={<Users size={15} />}>Add to queue</Button>} />
+    <PageHeading eyebrow="Reception · Overview" title={`Welcome, ${user?.displayName || 'Reception'}`} description="A clear view of today’s appointments, queue and collections." actions={<Button onClick={() => navigate('/reception/queue')} icon={<Users size={15} />}>Add to queue</Button>} />
     <div className="stats-grid">{metrics.map((item) => <StatCard key={item.label} {...item} />)}</div>
     <div className="content-grid">
-      <Card><SectionHeading title="Department activity" subtitle="Appointments scheduled across the last seven days" action={<Badge tone="info">Live demo data</Badge>} /><div className="chart-box"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData} margin={{ top: 5, right: 5, left: -18, bottom: 0 }}><CartesianGrid stroke="#EAF0F2" vertical={false} /><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 10 }} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 10 }} /><Tooltip contentStyle={{ borderRadius: 10, borderColor: '#DCE5E9', fontSize: 11 }} /><Bar dataKey="skin" name="Skin" fill="#177E89" radius={[5, 5, 0, 0]} /><Bar dataKey="orthopaedics" name="Orthopaedics" fill="#17324D" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer></div><div className="chart-legend"><span><i className="legend-dot" style={{ background: '#177E89' }} />Skin</span><span><i className="legend-dot" style={{ background: '#17324D' }} />Orthopaedics</span></div></Card>
+      <Card><SectionHeading title="Department activity" subtitle="Appointments scheduled across the last seven days" /><div className="chart-box"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData} margin={{ top: 5, right: 5, left: -18, bottom: 0 }}><CartesianGrid stroke="#EAF0F2" vertical={false} /><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 10 }} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 10 }} /><Tooltip contentStyle={{ borderRadius: 10, borderColor: '#DCE5E9', fontSize: 11 }} /><Bar dataKey="skin" name="Skin" fill="#177E89" radius={[5, 5, 0, 0]} /><Bar dataKey="orthopaedics" name="Orthopaedics" fill="#17324D" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer></div><div className="chart-legend"><span><i className="legend-dot" style={{ background: '#177E89' }} />Skin</span><span><i className="legend-dot" style={{ background: '#17324D' }} />Orthopaedics</span></div></Card>
       <Card><SectionHeading title="Today by department" subtitle="Scheduled appointments" /><div className="chart-box" style={{ height: 188 }}><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={deptData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={75} paddingAngle={3}>{deptData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}</Pie><Tooltip contentStyle={{ borderRadius: 10, borderColor: '#DCE5E9', fontSize: 11 }} /></PieChart></ResponsiveContainer></div><div className="metric-list">{deptData.map((item) => <div className="metric-line" key={item.name}><span><i className="legend-dot" style={{ background: item.color }} />{item.name}</span><strong>{item.value} appointments</strong></div>)}</div></Card>
     </div>
     <div className="content-grid">

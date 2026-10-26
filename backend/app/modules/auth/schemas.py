@@ -22,13 +22,19 @@ class ChangePasswordRequest(CamelModel):
     new_password: str
 
 
+class RefreshRequest(CamelModel):
+    refresh_token: str | None = None
+
+
 class LoginResponse(CamelModel):
     access_token: str
     token_type: str = "bearer"
+    refresh_token: str | None = None
     user: UserPublic
 
 
 class RefreshResponse(CamelModel):
     access_token: str
     token_type: str = "bearer"
+    refresh_token: str | None = None
     user: UserPublic

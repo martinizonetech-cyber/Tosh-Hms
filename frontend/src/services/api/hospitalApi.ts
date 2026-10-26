@@ -9,7 +9,12 @@ const queryString = (params: object) => {
   return search.size ? `?${search.toString()}` : '';
 };
 
-export const hospitalApi: HospitalRepository = {
+export interface ApiRepository extends HospitalRepository {
+  listVisits(params?: { patientId?: string; department?: string; status?: string; page?: number; pageSize?: number }): Promise<PaginatedResponse<Consultation>>;
+  renameDocument(id: string, name: string): Promise<PatientDocument>;
+}
+
+export const hospitalApi: ApiRepository = {
   listPatients(params: PatientSearchParams = {}) { return requestJson<PaginatedResponse<Patient>>(`/patients${queryString(params)}`); },
   createPatient(input: PatientDraft & { department: Department }) { const body: CreatePatientRequest = input; return requestJson<Patient>('/patients', { method: 'POST', body: JSON.stringify(body) }); },
   listAppointments(params: AppointmentSearchParams = {}) { return requestJson<PaginatedResponse<Appointment>>(`/appointments${queryString(params)}`); },

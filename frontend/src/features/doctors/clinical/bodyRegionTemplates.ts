@@ -147,6 +147,23 @@ export const DEFAULT_BODY_REGION_TEMPLATES: BodyRegionDefinition[] = [
     ],
   },
 ];
+export const TEMPLATES_UPDATED_EVENT = 'tosh-body-region-templates-updated';
+
+export function getDefault10Tablets(regionName: string): BodyRegionMedication[] {
+  const cleanId = regionName.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'region';
+  return [
+    { id: `${cleanId}-1`, medicineName: 'Tab. Aceclofenac + Paracetamol', strength: '100mg / 325mg', dosage: '1 Tab', route: 'Oral', frequency: 'Twice daily (BD)', duration: '5 Days', instructions: 'Take after meals (Analgesic & anti-inflammatory)' },
+    { id: `${cleanId}-2`, medicineName: 'Tab. Pantoprazole', strength: '40mg', dosage: '1 Tab', route: 'Oral', frequency: 'Once daily (OD)', duration: '5 Days', instructions: 'Take in morning on empty stomach' },
+    { id: `${cleanId}-3`, medicineName: 'Tab. Thiocolchicoside', strength: '4mg', dosage: '1 Tab', route: 'Oral', frequency: 'Twice daily (BD)', duration: '5 Days', instructions: 'Take after meals for muscle relaxation' },
+    { id: `${cleanId}-4`, medicineName: 'Tab. Calcium Carbonate + Vitamin D3', strength: '500mg / 250IU', dosage: '1 Tab', route: 'Oral', frequency: 'Once daily (OD)', duration: '30 Days', instructions: 'Take after dinner for bone mineralization' },
+    { id: `${cleanId}-5`, medicineName: 'Tab. Serratiopeptidase', strength: '10mg', dosage: '1 Tab', route: 'Oral', frequency: 'Twice daily (BD)', duration: '5 Days', instructions: 'Take before meals for joint effusion/swelling' },
+    { id: `${cleanId}-6`, medicineName: 'Gel. Diclofenac Diethylamine', strength: '1.16% w/w', dosage: 'Thin layer', route: 'Topical', frequency: '3 times daily (TDS)', duration: '7 Days', instructions: 'Apply gently over painful area; do not massage vigorously' },
+    { id: `${cleanId}-7`, medicineName: 'Tab. Paracetamol', strength: '650mg', dosage: '1 Tab', route: 'Oral', frequency: 'SOS (As needed)', duration: '5 Days', instructions: 'Take as needed for pain relief' },
+    { id: `${cleanId}-8`, medicineName: 'Sachet. Cholecalciferol (Vitamin D3)', strength: '60,000 IU', dosage: '1 Sachet', route: 'Oral', frequency: 'Once weekly', duration: '8 Weeks', instructions: 'Take weekly with warm milk' },
+    { id: `${cleanId}-9`, medicineName: 'Tab. Methylcobalamin', strength: '1500mcg', dosage: '1 Tab', route: 'Oral', frequency: 'Once daily (OD)', duration: '30 Days', instructions: 'Take after breakfast for nerve health & recovery' },
+    { id: `${cleanId}-10`, medicineName: 'Tab. Tramadol + Paracetamol', strength: '37.5mg / 325mg', dosage: '1 Tab', route: 'Oral', frequency: 'SOS (As needed)', duration: '3 Days', instructions: 'Take in case of severe pain only' },
+  ];
+}
 
 import { DATA_MODE } from '../../../services/repositories/mode';
 import { requestJson } from '../../../services/api/httpClient';
@@ -157,10 +174,11 @@ export async function fetchBodyRegionTemplates(): Promise<BodyRegionDefinition[]
   if (DATA_MODE === 'api') {
     try {
       const data = await requestJson<BodyRegionDefinition[]>('/templates/body-regions');
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         cachedApiTemplates = data;
         if (typeof window !== 'undefined') {
           window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(data));
+          window.dispatchEvent(new CustomEvent(TEMPLATES_UPDATED_EVENT, { detail: data }));
         }
         return data;
       }
@@ -172,7 +190,7 @@ export async function fetchBodyRegionTemplates(): Promise<BodyRegionDefinition[]
 }
 
 export function readBodyRegionTemplates(): BodyRegionDefinition[] {
-  if (cachedApiTemplates && cachedApiTemplates.length > 0) {
+  if (cachedApiTemplates !== null) {
     return cachedApiTemplates;
   }
   if (typeof window !== 'undefined') {
@@ -180,23 +198,15 @@ export function readBodyRegionTemplates(): BodyRegionDefinition[] {
       const raw = window.localStorage.getItem(TEMPLATE_STORAGE_KEY);
       if (raw) {
         const candidate = JSON.parse(raw) as unknown;
-        if (Array.isArray(candidate) && candidate.every((item) => item && typeof item.region === 'string' && Array.isArray(item.fields))) {
-          const list = candidate.map((item) => {
-            const def = DEFAULT_BODY_REGION_TEMPLATES.find((d) => d.region.toLowerCase() === item.region.toLowerCase());
-            const meds = Array.isArray(item.medications) && item.medications.length > 0
-              ? item.medications
-              : (def?.medications || DEFAULT_BODY_REGION_TEMPLATES[DEFAULT_BODY_REGION_TEMPLATES.length - 1].medications);
-            return {
-              region: item.region,
-              fields: item.fields,
-              medications: meds,
-            };
-          }) as BodyRegionDefinition[];
-          cachedApiTemplates = list;
-          return list;
+        if (Array.isArray(candidate)) {
+          cachedApiTemplates = candidate as BodyRegionDefinition[];
+          return candidate as BodyRegionDefinition[];
         }
       }
     } catch { /* proceed */ }
+  }
+  if (DATA_MODE === 'api') {
+    return [];
   }
   return DEFAULT_BODY_REGION_TEMPLATES;
 }
@@ -205,11 +215,23 @@ export async function saveBodyRegionTemplates(value: BodyRegionDefinition[]): Pr
   cachedApiTemplates = value;
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(value));
+    window.dispatchEvent(new CustomEvent(TEMPLATES_UPDATED_EVENT, { detail: value }));
   }
   if (DATA_MODE === 'api') {
-    await requestJson<BodyRegionDefinition[]>('/templates/body-regions', {
-      method: 'PUT',
-      body: JSON.stringify(value),
-    });
+    try {
+      const serverData = await requestJson<BodyRegionDefinition[]>('/templates/body-regions', {
+        method: 'PUT',
+        body: JSON.stringify(value),
+      });
+      if (Array.isArray(serverData) && serverData.length > 0) {
+        cachedApiTemplates = serverData;
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(serverData));
+        }
+      }
+    } catch (err) {
+      console.warn('API sync failed, saved in local storage', err);
+      throw err;
+    }
   }
 }

@@ -48,7 +48,7 @@ export function PatientDocumentsModal({
   department: propDepartment,
   defaultCategory = 'Prescription',
 }: PatientDocumentsModalProps) {
-  const { state, repository } = useHospitalData();
+  const { state, repository, mode } = useHospitalData();
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -103,14 +103,20 @@ export function PatientDocumentsModal({
 
     setBusy(true);
     try {
-      const demoDocs = await createBrowserDemoDocuments(files, patient.id, category);
-      repository.addDocuments(
-        patient.id,
-        department,
-        demoDocs,
-        queueEntry?.visitId,
-        queueEntry?.id
-      );
+      if (mode === 'api') {
+        for (const file of files) {
+          await repository.uploadDocument(patient.id, category, file, currentVisitId);
+        }
+      } else {
+        const demoDocs = await createBrowserDemoDocuments(files, patient.id, category);
+        repository.addDocuments(
+          patient.id,
+          department,
+          demoDocs,
+          queueEntry?.visitId,
+          queueEntry?.id
+        );
+      }
       toast.push(
         `${files.length} document${files.length > 1 ? 's' : ''} uploaded and saved to patient record.`
       );

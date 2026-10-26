@@ -3,6 +3,7 @@ import { Activity, ArrowRight, CalendarDays, CheckCheck, Clock3, Users } from 'l
 import { useNavigate } from 'react-router-dom';
 import type { Department } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';
+import { useAuth } from '../../services/auth/AuthContext';
 import { timeLabel } from '../../utils/format';
 import { Badge, statusTone } from '../../components/ui/Badge';
 import { Card, SectionHeading, StatCard } from '../../components/ui/Card';
@@ -12,6 +13,7 @@ import { PageHeading, PatientCell } from '../../components/shared/Primitives';
 
 export function DoctorDashboard({ department }: { department: Department }) {
   const { state } = useHospitalData();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const today = startOfDay(new Date());
   const appointments = state.appointments.filter((item) => item.department === department && isSameDay(new Date(item.startsAt), today));
@@ -21,19 +23,19 @@ export function DoctorDashboard({ department }: { department: Department }) {
   const completed = queue.filter((item) => item.status === 'Completed').length;
   const due = state.followUps.filter((item) => item.department === department && item.status === 'Upcoming' && new Date(`${item.date}T00:00:00`) <= addDays(today, 2)).length;
   const deptTitle = department === 'skin' ? 'Skin & Dermatology' : 'Orthopaedics';
-  const doctorName = department === 'skin' ? 'Dr. Sangamitra' : 'Dr. Sundarprakash';
+  const doctorName = user?.displayName || (department === 'skin' ? 'Dr. Sangamitra' : 'Dr. Sundarprakash');
   const rows = [...appointments].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   const { page, setPage, pageSize, setPageSize, pagedItems: pagedRows, total } = usePagination(rows, 5);
   const cards = [
     { label: "Today's appointments", value: appointments.length, hint: 'Booked for today', icon: <CalendarDays size={16} /> },
     { label: 'Waiting patients', value: waiting, hint: 'Ready for your review', icon: <Clock3 size={16} /> },
     { label: 'In consultation', value: consulting, hint: 'Currently with a clinician', icon: <Activity size={16} /> },
-    { label: 'Completed visits', value: completed, hint: 'Marked complete in demo', icon: <CheckCheck size={16} /> },
+    { label: 'Completed visits', value: completed, hint: 'Visits completed today', icon: <CheckCheck size={16} /> },
   ];
   return <>
     <PageHeading
       eyebrow={`${deptTitle} · Clinical workspace`}
-      title={`Good morning, ${doctorName.split(' ')[1]}`}
+      title={`Welcome, ${doctorName}`}
       description="Your appointments and patient work, in one place."
       actions={<Button onClick={() => navigate(`/${department === 'skin' ? 'skin' : 'ortho'}/consultation`)} icon={<Users size={15} />}>Open consultation</Button>}
     />

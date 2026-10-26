@@ -21,12 +21,14 @@ export function Modal({
   className?: string;
 }>) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
     const prior = document.activeElement as HTMLElement | null;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') onCloseRef.current();
       if (event.key === 'Tab' && dialogRef.current) {
         const items = dialogRef.current.querySelectorAll<HTMLElement>(
           'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"]'
@@ -45,16 +47,17 @@ export function Modal({
     };
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
-    window.setTimeout(
+    const timer = window.setTimeout(
       () => dialogRef.current?.querySelector<HTMLElement>('input,button,select,textarea')?.focus(),
       0
     );
     return () => {
+      window.clearTimeout(timer);
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
       prior?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

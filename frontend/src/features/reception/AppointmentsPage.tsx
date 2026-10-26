@@ -115,7 +115,8 @@ export function AppointmentsPage() {
         const res = await repository.createPatient({ ...values, email: values.email || undefined, department: selectedDepartment });
         patientId = typeof res === 'object' && res?.id ? res.id : res;
       }
-      await repository.addAppointment({ ...appointmentForm.getValues(), patientId, startsAt: new Date(appointmentForm.getValues('startsAt')).toISOString() });
+      const doctor = appointmentForm.getValues('doctor') || doctors[selectedDepartment]?.[0] || (selectedDepartment === 'skin' ? 'Dr. Sangamitra' : 'Dr. Sundarprakash');
+      await repository.addAppointment({ ...appointmentForm.getValues(), patientId, doctor, startsAt: new Date(appointmentForm.getValues('startsAt')).toISOString() });
       toast.push('Appointment successfully scheduled.', 'success');
       setOpen(false);
     } catch (error: any) {
@@ -165,7 +166,7 @@ export function AppointmentsPage() {
       <TablePagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={setPageSize} />
       </> : <EmptyState title="No appointments on this date" message="Try another date or create a new appointment." icon={<CalendarDays size={18} />} action={<Button size="small" onClick={openCreate}>Schedule a visit</Button>} />}
     </Card>
-    <Modal wide open={open} title="Schedule an appointment" subtitle="Select an existing patient or register a fictional demo patient." onClose={() => setOpen(false)} footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" form="appointment-form">Schedule appointment</Button></>}>
+    <Modal wide open={open} title="Schedule an appointment" subtitle="Select an existing patient or register a new patient." onClose={() => setOpen(false)} footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" form="appointment-form">Schedule appointment</Button></>}>
       <form id="appointment-form" onSubmit={saveAppointment} className="form-grid three">
         <div className="field span-3"><label>Patient</label><div className="segmented-control"><button type="button" className={patientMode === 'existing' ? 'active' : ''} onClick={() => { setPatientMode('existing'); appointmentForm.setValue('patientId', ''); }}>Existing patient</button><button type="button" className={patientMode === 'new' ? 'active' : ''} onClick={() => { setPatientMode('new'); appointmentForm.setValue('patientId', 'new-patient-pending'); }}>New patient</button></div></div>
         {patientMode === 'existing' ? <>
@@ -266,10 +267,9 @@ export function AppointmentsPage() {
           <Field id="new-patient-address" label="Address" required maxLength={150} placeholder="Street address, locality, city" className="span-3" error={newPatientForm.formState.errors.address?.message as string} {...newPatientForm.register('address')} />
         </>}
         <div className="field"><label htmlFor="appointment-department">Department</label><select id="appointment-department" className="control" value={selectedDepartment} onChange={(event) => changeDepartment(event.target.value as Department)}><option value="skin">Skin / Dermatology</option><option value="orthopaedics">Orthopaedics</option></select></div>
-        <div className="field"><label htmlFor="appointment-doctor">Doctor</label><select id="appointment-doctor" className="control" {...appointmentForm.register('doctor')}>{doctors[selectedDepartment].map((doctor) => <option key={doctor}>{doctor}</option>)}</select></div>
         <div className="field"><label htmlFor="appointment-visit-type">Visit type</label><select id="appointment-visit-type" className="control" {...appointmentForm.register('visitType')}><option>New</option><option>Follow-up</option><option>Walk-in</option></select></div>
         <Field id="appointment-date-time" label="Date and time" type="datetime-local" required {...appointmentForm.register('startsAt')} />
-        <TextAreaField id="appointment-note" label="Note (optional)" placeholder="Short scheduling note" className="span-2" maxLength={240} {...appointmentForm.register('note')} />
+        <TextAreaField id="appointment-note" label="Note (optional)" placeholder="Short scheduling note" className="span-3" maxLength={240} {...appointmentForm.register('note')} />
       </form>
     </Modal>
     <Modal open={Boolean(rescheduling)} title="Reschedule appointment" subtitle="Choose the updated date and time." onClose={() => setRescheduling(null)} footer={<><Button variant="secondary" onClick={() => setRescheduling(null)}>Cancel</Button><Button onClick={saveReschedule}>Save new time</Button></>}><Field id="reschedule-time" label="New date and time" type="datetime-local" value={rescheduleValue} onChange={(event) => setRescheduleValue(event.target.value)} /></Modal>

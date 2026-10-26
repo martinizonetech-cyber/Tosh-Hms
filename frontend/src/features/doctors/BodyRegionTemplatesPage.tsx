@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Bone, Edit2, Pill, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import type { BodyRegionDefinition, BodyRegionMedication } from './clinical/bodyRegionTemplates';
-import { DEFAULT_BODY_REGION_TEMPLATES, fetchBodyRegionTemplates, readBodyRegionTemplates, saveBodyRegionTemplates } from './clinical/bodyRegionTemplates';
+import {
+  DEFAULT_BODY_REGION_TEMPLATES,
+  fetchBodyRegionTemplates,
+  readBodyRegionTemplates,
+  saveBodyRegionTemplates,
+  TEMPLATES_UPDATED_EVENT,
+} from './clinical/bodyRegionTemplates';
 import { useToast } from '../../components/ui/Toast';
 import { PageHeading } from '../../components/shared/Primitives';
 import { Button } from '../../components/ui/Button';
@@ -9,6 +15,7 @@ import { Card, SectionHeading } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Field } from '../../components/ui/Field';
 import { Modal } from '../../components/ui/Modal';
+
 
 export function BodyRegionTemplatesPage() {
   const toast = useToast();
@@ -27,17 +34,38 @@ export function BodyRegionTemplatesPage() {
   useEffect(() => {
     let mounted = true;
     fetchBodyRegionTemplates().then((remoteTemplates) => {
-      if (mounted && remoteTemplates && remoteTemplates.length > 0) {
+      if (mounted && Array.isArray(remoteTemplates)) {
         setTemplates(remoteTemplates);
-        setSelected((prev) => (remoteTemplates.some((t) => t.region === prev) ? prev : remoteTemplates[0].region));
+        if (remoteTemplates.length > 0) {
+          setSelected((prev) => (remoteTemplates.some((t) => t.region === prev) ? prev : remoteTemplates[0].region));
+        } else {
+          setSelected('');
+        }
       }
     }).catch(() => {});
     return () => { mounted = false; };
   }, []);
 
+  // Listen for template update events across tabs
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (Array.isArray(e.detail)) {
+        setTemplates(e.detail);
+        if (e.detail.length > 0) {
+          setSelected((prev) => (e.detail.some((t: any) => t.region === prev) ? prev : e.detail[0].region));
+        } else {
+          setSelected('');
+        }
+      }
+    };
+    window.addEventListener(TEMPLATES_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(TEMPLATES_UPDATED_EVENT, handler);
+  }, []);
+
   // Add new body region modal state
   const [addingRegion, setAddingRegion] = useState(false);
   const [newRegionName, setNewRegionName] = useState('');
+  const [newRegionFields, setNewRegionFields] = useState<string[]>([]);
 
   // Add / Edit medication modal state
   const [editingMed, setEditingMed] = useState<{ isNew: boolean; data: BodyRegionMedication } | null>(null);
@@ -58,24 +86,39 @@ export function BodyRegionTemplatesPage() {
     );
   };
 
-  const addField = () => {
-    setTemplates((items) =>
-      items.map((item) =>
-        item.region === selected
-          ? { ...item, fields: [...item.fields, 'New examination field'] }
-          : item
-      )
+  const addField = async () => {
+    const next = templates.map((item) =>
+      item.region === selected
+        ? { ...item, fields: [...item.fields, 'New examination field'] }
+        : item
     );
+    setTemplates(next);
+    setSaving(true);
+    try {
+      await saveBodyRegionTemplates(next);
+    } catch {
+      // Saved locally
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const removeField = (index: number) => {
-    setTemplates((items) =>
-      items.map((item) =>
-        item.region === selected
-          ? { ...item, fields: item.fields.filter((_, fieldIndex) => fieldIndex !== index) }
-          : item
-      )
+  const removeField = async (index: number) => {
+    const next = templates.map((item) =>
+      item.region === selected
+        ? { ...item, fields: item.fields.filter((_, fieldIndex) => fieldIndex !== index) }
+        : item
     );
+    setTemplates(next);
+    setSaving(true);
+    try {
+      await saveBodyRegionTemplates(next);
+      toast.push('Field removed.');
+    } catch {
+      // Saved locally
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Region handlers
@@ -90,22 +133,11 @@ export function BodyRegionTemplatesPage() {
       return;
     }
 
-    const cleanId = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const cleanFields = newRegionFields.map((f) => f.trim()).filter(Boolean);
     const newRegion: BodyRegionDefinition = {
       region: trimmed,
-      fields: ['Range of motion', 'Stability & alignment', 'Swelling & tenderness', 'Functional movements'],
-      medications: [
-        { id: `${cleanId}-1`, medicineName: 'Tab. Aceclofenac + Paracetamol', strength: '100mg / 325mg', dosage: '1 Tab', route: 'Oral', frequency: 'Twice daily (BD)', duration: '5 Days', instructions: 'Take after meals' },
-        { id: `${cleanId}-2`, medicineName: 'Tab. Pantoprazole', strength: '40mg', dosage: '1 Tab', route: 'Oral', frequency: 'Once daily (OD)', duration: '5 Days', instructions: 'Take in morning before food' },
-        { id: `${cleanId}-3`, medicineName: 'Tab. Thiocolchicoside', strength: '4mg', dosage: '1 Tab', route: 'Oral', frequency: 'Twice daily (BD)', duration: '5 Days', instructions: 'Take after meals for muscle relaxation' },
-        { id: `${cleanId}-4`, medicineName: 'Tab. Calcium Carbonate + Vitamin D3', strength: '500mg / 250IU', dosage: '1 Tab', route: 'Oral', frequency: 'Once daily (OD)', duration: '30 Days', instructions: 'Take after dinner' },
-        { id: `${cleanId}-5`, medicineName: 'Tab. Serratiopeptidase', strength: '10mg', dosage: '1 Tab', route: 'Oral', frequency: 'Twice daily (BD)', duration: '5 Days', instructions: 'Take before meals for swelling' },
-        { id: `${cleanId}-6`, medicineName: 'Gel. Diclofenac Diethylamine', strength: '1.16% w/w', dosage: 'Thin layer', route: 'Topical', frequency: '3 times daily (TDS)', duration: '7 Days', instructions: 'Apply gently over painful area' },
-        { id: `${cleanId}-7`, medicineName: 'Tab. Paracetamol', strength: '650mg', dosage: '1 Tab', route: 'Oral', frequency: 'SOS', duration: '5 Days', instructions: 'Take as needed for pain' },
-        { id: `${cleanId}-8`, medicineName: 'Sachet. Cholecalciferol (Vitamin D3)', strength: '60,000 IU', dosage: '1 Sachet', route: 'Oral', frequency: 'Once weekly', duration: '8 Weeks', instructions: 'Take weekly with warm milk' },
-        { id: `${cleanId}-9`, medicineName: 'Tab. Methylcobalamin', strength: '1500mcg', dosage: '1 Tab', route: 'Oral', frequency: 'Once daily (OD)', duration: '30 Days', instructions: 'Take after breakfast for nerve health' },
-        { id: `${cleanId}-10`, medicineName: 'Tab. Tramadol + Paracetamol', strength: '37.5mg / 325mg', dosage: '1 Tab', route: 'Oral', frequency: 'SOS', duration: '3 Days', instructions: 'Take in case of severe pain only' },
-      ],
+      fields: cleanFields,
+      medications: [],
     };
 
     const next = [...templates, newRegion];
@@ -113,10 +145,11 @@ export function BodyRegionTemplatesPage() {
     setSelected(trimmed);
     setAddingRegion(false);
     setNewRegionName('');
+    setNewRegionFields([]);
     setSaving(true);
     try {
       await saveBodyRegionTemplates(next);
-      toast.push(`Body region "${trimmed}" added with 10 standard tablets.`);
+      toast.push(`Body region "${trimmed}" created successfully.`);
     } catch (err) {
       toast.push(`Body region "${trimmed}" added locally.`, 'info');
     } finally {
@@ -170,7 +203,7 @@ export function BodyRegionTemplatesPage() {
     });
   };
 
-  const saveMed = () => {
+  const saveMed = async () => {
     if (!editingMed || !active) return;
     const { isNew, data } = editingMed;
     if (!data.medicineName.trim()) {
@@ -178,30 +211,54 @@ export function BodyRegionTemplatesPage() {
       return;
     }
 
-    setTemplates((items) =>
-      items.map((item) => {
-        if (item.region !== selected) return item;
-        const meds = isNew
-          ? [...item.medications, data]
-          : item.medications.map((m) => (m.id === data.id ? data : m));
-        return { ...item, medications: meds };
-      })
-    );
+    const next = templates.map((item) => {
+      if (item.region !== selected) return item;
+      const meds = isNew
+        ? [...item.medications, data]
+        : item.medications.map((m) => (m.id === data.id ? data : m));
+      return { ...item, medications: meds };
+    });
 
+    setTemplates(next);
     setEditingMed(null);
-    toast.push(isNew ? 'Tablet added to template.' : 'Tablet details updated.');
+    setSaving(true);
+    try {
+      await saveBodyRegionTemplates(next);
+      toast.push(isNew ? `Tablet "${data.medicineName}" added and saved.` : `Tablet "${data.medicineName}" saved.`);
+    } catch (err) {
+      toast.push(
+        err instanceof Error ? err.message : 'Tablet updated locally, but server sync failed.',
+        'info'
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const removeMed = (medId: string) => {
+  const removeMed = async (medId: string) => {
     if (!active) return;
-    setTemplates((items) =>
-      items.map((item) =>
-        item.region === selected
-          ? { ...item, medications: item.medications.filter((m) => m.id !== medId) }
-          : item
-      )
+    const target = active.medications.find((m) => m.id === medId);
+    const medName = target?.medicineName || 'Tablet';
+
+    const next = templates.map((item) =>
+      item.region === selected
+        ? { ...item, medications: item.medications.filter((m) => m.id !== medId) }
+        : item
     );
-    toast.push('Tablet removed from template.');
+
+    setTemplates(next);
+    setSaving(true);
+    try {
+      await saveBodyRegionTemplates(next);
+      toast.push(`Removed "${medName}".`);
+    } catch (err) {
+      toast.push(
+        err instanceof Error ? err.message : 'Tablet removed locally, but server sync failed.',
+        'info'
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Storage handlers
@@ -356,91 +413,104 @@ export function BodyRegionTemplatesPage() {
                     </Button>
                   </div>
 
-                  <div style={{ display: 'grid', gap: 9 }}>
-                    {active.medications.map((med, index) => (
-                      <div
-                        key={med.id}
-                        style={{
-                          border: '1px solid var(--line)',
-                          borderRadius: 12,
-                          padding: '14px 16px',
-                          background: '#FAFCFC',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 14,
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0, flex: 1 }}>
-                          <span
-                            style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: '50%',
-                              background: '#E2F1F0',
-                              color: '#177E89',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: 13,
-                              fontWeight: 700,
-                              flexShrink: 0,
-                              marginTop: 2,
-                            }}
-                          >
-                            {index + 1}
-                          </span>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                              <strong style={{ fontSize: 15.5, color: 'var(--navy)' }}>{med.medicineName}</strong>
-                              {med.strength && (
-                                <span
-                                  style={{
-                                    fontSize: 12.5,
-                                    padding: '3px 9px',
-                                    borderRadius: 6,
-                                    background: '#EEF2F6',
-                                    color: '#334155',
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  {med.strength}
-                                </span>
+                  {active.medications.length === 0 ? (
+                    <div style={{ padding: 24, textAlign: 'center', border: '1px dashed #CBD5E1', borderRadius: 10, background: '#F8FAFC', marginBottom: 12 }}>
+                      <Pill size={28} color="#94A3B8" style={{ margin: '0 auto 8px', display: 'block' }} />
+                      <strong style={{ fontSize: 14, color: 'var(--navy)' }}>No tablets configured for {active.region}</strong>
+                      <p style={{ fontSize: 12, color: '#64748B', margin: '4px 0 12px' }}>
+                        Tablets for this region are created manually. Click &ldquo;Add Tablet&rdquo; below to create your first tablet.
+                      </p>
+                      <Button variant="secondary" size="small" onClick={openNewMed} icon={<Plus size={14} />}>
+                        Add Tablet
+                      </Button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: 9 }}>
+                      {active.medications.map((med, index) => (
+                        <div
+                          key={med.id}
+                          style={{
+                            border: '1px solid var(--line)',
+                            borderRadius: 12,
+                            padding: '14px 16px',
+                            background: '#FAFCFC',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 14,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0, flex: 1 }}>
+                            <span
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: '50%',
+                                background: '#E2F1F0',
+                                color: '#177E89',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: 13,
+                                fontWeight: 700,
+                                flexShrink: 0,
+                                marginTop: 2,
+                              }}
+                            >
+                              {index + 1}
+                            </span>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                                <strong style={{ fontSize: 15.5, color: 'var(--navy)' }}>{med.medicineName}</strong>
+                                {med.strength && (
+                                  <span
+                                    style={{
+                                      fontSize: 12.5,
+                                      padding: '3px 9px',
+                                      borderRadius: 6,
+                                      background: '#EEF2F6',
+                                      color: '#334155',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {med.strength}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', gap: 12, marginTop: 5, fontSize: 13.5, color: '#475569', flexWrap: 'wrap' }}>
+                                <span><strong>Dosage:</strong> {med.dosage}</span>
+                                <span>·</span>
+                                <span><strong>Frequency:</strong> {med.frequency}</span>
+                                <span>·</span>
+                                <span><strong>Duration:</strong> {med.duration}</span>
+                                <span>·</span>
+                                <span><strong>Route:</strong> {med.route}</span>
+                              </div>
+                              {med.instructions && (
+                                <div style={{ marginTop: 5, fontSize: 13, color: '#0F766E', fontStyle: 'italic', background: '#F0FDFA', padding: '3px 8px', borderRadius: 4, display: 'inline-block' }}>
+                                  Instructions: {med.instructions}
+                                </div>
                               )}
                             </div>
-                            <div style={{ display: 'flex', gap: 12, marginTop: 5, fontSize: 13.5, color: '#475569', flexWrap: 'wrap' }}>
-                              <span><strong>Dosage:</strong> {med.dosage}</span>
-                              <span>·</span>
-                              <span><strong>Frequency:</strong> {med.frequency}</span>
-                              <span>·</span>
-                              <span><strong>Duration:</strong> {med.duration}</span>
-                              <span>·</span>
-                              <span><strong>Route:</strong> {med.route}</span>
-                            </div>
-                            {med.instructions && (
-                              <div style={{ marginTop: 5, fontSize: 13, color: '#0F766E', fontStyle: 'italic', background: '#F0FDFA', padding: '3px 8px', borderRadius: 4, display: 'inline-block' }}>
-                                Instructions: {med.instructions}
-                              </div>
-                            )}
+                          </div>
+
+                          <div className="button-row" style={{ flexShrink: 0 }}>
+                            <Button size="small" variant="secondary" onClick={() => openEditMed(med)} icon={<Edit2 size={14} />}>
+                              Edit
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="ghost"
+                              onClick={() => removeMed(med.id)}
+                              icon={<Trash2 size={14} color="#DC2626" />}
+                            >
+                              Remove
+                            </Button>
                           </div>
                         </div>
-
-                        <div className="button-row" style={{ flexShrink: 0 }}>
-                          <Button size="small" variant="secondary" onClick={() => openEditMed(med)} icon={<Edit2 size={14} />}>
-                            Edit
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="ghost"
-                            onClick={() => removeMed(med.id)}
-                            icon={<Trash2 size={14} color="#DC2626" />}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="button-row" style={{ marginTop: 8 }}>
                     <Button variant="secondary" onClick={openNewMed} icon={<Plus size={14} />}>
@@ -512,11 +582,22 @@ export function BodyRegionTemplatesPage() {
       <Modal
         open={addingRegion}
         title="Add New Body Region"
-        subtitle="Create a new orthopaedic region template with customizable fields and 10 default tablets."
-        onClose={() => setAddingRegion(false)}
+        subtitle="Create a new orthopaedic region template with customizable examination fields and manually added tablets."
+        onClose={() => {
+          setAddingRegion(false);
+          setNewRegionName('');
+          setNewRegionFields([]);
+        }}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setAddingRegion(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setAddingRegion(false);
+                setNewRegionName('');
+                setNewRegionFields([]);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={handleAddRegion} icon={<Plus size={14} />}>
@@ -525,19 +606,80 @@ export function BodyRegionTemplatesPage() {
           </>
         }
       >
-        <div className="field">
-          <label htmlFor="new-region-name">Body Region Name *</label>
-          <input
-            id="new-region-name"
-            className="control"
-            placeholder="e.g. Cervical Spine, Lumbar Spine, Sacroiliac Joint, Clavicle..."
-            value={newRegionName}
-            onChange={(e) => setNewRegionName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAddRegion();
-            }}
-            autoFocus
-          />
+        <div className="stack" style={{ gap: 14 }}>
+          <div className="field">
+            <label htmlFor="new-region-name">Body Region Name *</label>
+            <input
+              id="new-region-name"
+              className="control"
+              placeholder="e.g. Cervical Spine, Lumbar Spine, Sacroiliac Joint, Clavicle..."
+              value={newRegionName}
+              onChange={(e) => setNewRegionName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddRegion();
+              }}
+            />
+          </div>
+
+          <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 12, background: '#FAFCFC' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div>
+                <strong style={{ fontSize: 13, color: 'var(--navy)' }}>Customizable Examination Prompts</strong>
+                <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)' }}>
+                  Add examination fields for this new region (optional).
+                </p>
+              </div>
+              <Button
+                size="small"
+                variant="secondary"
+                type="button"
+                onClick={() => setNewRegionFields((prev) => [...prev, ''])}
+                icon={<Plus size={13} />}
+              >
+                Add Field
+              </Button>
+            </div>
+            {newRegionFields.length === 0 ? (
+              <p style={{ fontSize: 11.5, color: '#64748B', margin: '6px 0 2px', fontStyle: 'italic' }}>
+                No examination fields added yet. Click &ldquo;+ Add Field&rdquo; to add custom examination prompts.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gap: 7, maxHeight: 180, overflowY: 'auto' }}>
+                {newRegionFields.map((field, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      className="control"
+                      style={{ flex: 1, height: 32, fontSize: 12 }}
+                      value={field}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewRegionFields((prev) => prev.map((f, i) => (i === idx ? val : f)));
+                      }}
+                      placeholder={`Examination field #${idx + 1} (e.g. Tenderness, Range of motion...)`}
+                    />
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      type="button"
+                      onClick={() => setNewRegionFields((prev) => prev.filter((_, i) => i !== idx))}
+                      icon={<Trash2 size={13} color="#DC2626" />}
+                      aria-label="Remove field"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: 12, background: '#F8FAFC' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+              <Pill size={15} color="#64748B" />
+              <strong style={{ fontSize: 13, color: 'var(--navy)' }}>Tablets (Created Manually)</strong>
+            </div>
+            <p style={{ fontSize: 11.5, color: '#64748B', margin: 0 }}>
+              Tablets are not pre-configured. After creating this region, use the &ldquo;Add Tablet&rdquo; button in the Tablets tab to manually add tablets, dosages, and instructions.
+            </p>
+          </div>
         </div>
       </Modal>
 

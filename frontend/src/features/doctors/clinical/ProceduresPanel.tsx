@@ -9,7 +9,7 @@ import { Card, SectionHeading } from '../../../components/ui/Card';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Badge } from '../../../components/ui/Badge';
 import type { ClinicChargeItem } from '../../../services/charges/chargesService';
-import { getClinicCharges } from '../../../services/charges/chargesService';
+import { CHARGES_UPDATED_EVENT, fetchClinicCharges, getClinicCharges } from '../../../services/charges/chargesService';
 
 export function ProceduresPanel({
   patientId,
@@ -28,12 +28,30 @@ export function ProceduresPanel({
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
-  const [catalogCharges, setCatalogCharges] = useState<ClinicChargeItem[]>([]);
+  const [catalogCharges, setCatalogCharges] = useState<ClinicChargeItem[]>(() => getClinicCharges());
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Load charges master catalog
+  // Load charges master catalog and listen for updates
   useEffect(() => {
-    setCatalogCharges(getClinicCharges());
+    let mounted = true;
+    fetchClinicCharges()
+      .then((items) => {
+        if (mounted && Array.isArray(items) && items.length > 0) {
+          setCatalogCharges(items);
+        }
+      })
+      .catch(() => {});
+
+    const handler = (e: any) => {
+      if (Array.isArray(e.detail) && e.detail.length > 0) {
+        setCatalogCharges(e.detail);
+      }
+    };
+    window.addEventListener(CHARGES_UPDATED_EVENT, handler);
+    return () => {
+      mounted = false;
+      window.removeEventListener(CHARGES_UPDATED_EVENT, handler);
+    };
   }, []);
 
   // Filter charges based on description typed

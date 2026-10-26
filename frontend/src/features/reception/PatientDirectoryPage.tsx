@@ -101,12 +101,12 @@ export function PatientDirectoryPage() {
   const setSearch = (value: string) => { setPage(1); setQuery(value); setParams(value ? { q: value } : {}); };
 
   return <>
-    <PageHeading eyebrow="Reception · Records" title="All patients" description="Fictional demo records with visit history, appointments, invoices and follow-ups." actions={<Badge tone="info">{state.patients.length} demo records</Badge>} />
+    <PageHeading eyebrow="Reception · Records" title="All patients" description="Patient clinical records with visit history, appointments, invoices and follow-ups." actions={<Badge tone="info">{state.patients.length} patients</Badge>} />
     <Card padded={false}>
       <div style={{ padding: '19px 20px 0' }}>
         <SectionHeading
           title="Patients directory"
-          subtitle={`${matches.length} ${matches.length === 1 ? 'patient' : 'patients'} · demo state is shared across departments`}
+          subtitle={`${matches.length} ${matches.length === 1 ? 'patient' : 'patients'} registered in system`}
         />
       </div>
       <div className="schedule-date-toolbar">

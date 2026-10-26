@@ -105,14 +105,16 @@ export function QueuePage() {
   const addExisting = async () => {
     if (!selectedPatient) { toast.push('Choose an existing patient before adding to the queue.', 'error'); return; }
     try {
-      await repository.addQueueEntry({ patientId: selectedPatient, department, doctor, visitType, note, vitals });
+      const effectiveDoctor = doctor || doctors[department]?.[0] || getDoctorsByDepartment(department)[0];
+      await repository.addQueueEntry({ patientId: selectedPatient, department, doctor: effectiveDoctor, visitType, note, vitals });
       toast.push('Patient added to the queue.', 'success');
       setFlow(null); setSelectedPatient(''); setPatientSearch(''); setNote(''); setVitals(blankVitals());
     } catch (error) { toast.push(error instanceof Error ? error.message : 'Could not add patient.', 'error'); }
   };
   const addNew = handleSubmit(async (values) => {
     try {
-      await repository.addPatientAndQueue({ ...values, email: values.email || undefined, department, doctor, visitType, note, vitals });
+      const effectiveDoctor = doctor || doctors[department]?.[0] || getDoctorsByDepartment(department)[0];
+      await repository.addPatientAndQueue({ ...values, email: values.email || undefined, department, doctor: effectiveDoctor, visitType, note, vitals });
       toast.push(`Patient registered and added to the queue.`, 'success');
       reset(defaults); setFlow(null); setNote(''); setVitals(blankVitals());
     } catch (error: any) {
@@ -122,6 +124,7 @@ export function QueuePage() {
         );
         if (confirmForce) {
           try {
+            const effectiveDoctor = doctor || doctors[department]?.[0] || getDoctorsByDepartment(department)[0];
             const patient = await requestJson<Patient>('/patients?force=true', {
               method: 'POST',
               body: JSON.stringify({
@@ -138,7 +141,7 @@ export function QueuePage() {
             await repository.addQueueEntry({
               patientId: patient.id,
               department,
-              doctor,
+              doctor: effectiveDoctor,
               visitType,
               note,
               vitals,
@@ -173,10 +176,10 @@ export function QueuePage() {
   return <>
     <PageHeading eyebrow="Reception · Patient flow" title="Manage the queue" description="Check in an existing patient or register a new visitor, then keep the care team in sync." actions={<Button variant="secondary" onClick={() => navigate('/reception/appointments')} icon={<Users size={15} />}>Appointments</Button>} />
     <div className="queue-actions"><button className={`queue-action${flow === 'existing' ? ' selected' : ''}`} onClick={() => setFlow(flow === 'existing' ? null : 'existing')} type="button"><span className="queue-action-icon"><Search size={18} /></span><span><strong>Existing patient</strong><small>Search by ID, name, or phone</small></span><ArrowRight size={16} /></button><button className={`queue-action${flow === 'new' ? ' selected' : ''}`} onClick={() => setFlow(flow === 'new' ? null : 'new')} type="button"><span className="queue-action-icon"><UserRoundPlus size={18} /></span><span><strong>New patient</strong><small>Register and add a queue entry</small></span><Plus size={17} /></button></div>
-    {flow && <Card className="queue-flow mb-4"><SectionHeading title={flow === 'existing' ? 'Add an existing patient' : 'Register a new patient'} subtitle={flow === 'existing' ? 'The selected patient will be added to the shared department queue.' : 'Patient ID is generated only for this frontend demonstration.'} action={<button className="icon-button" aria-label="Close patient flow" type="button" onClick={() => setFlow(null)}>×</button>} />
+    {flow && <Card className="queue-flow mb-4"><SectionHeading title={flow === 'existing' ? 'Add an existing patient' : 'Register a new patient'} subtitle={flow === 'existing' ? 'The selected patient will be added to the shared department queue.' : 'Register patient and create visit in clinic queue.'} action={<button className="icon-button" aria-label="Close patient flow" type="button" onClick={() => setFlow(null)}>×</button>} />
       {flow === 'existing' ? <div className="form-grid">
         <div className="field span-2"><label htmlFor="patient-search">Search patients by ID, name, or phone</label><div className="search-field"><Search size={15} /><input id="patient-search" value={patientSearch} onChange={(event) => { setPatientSearch(event.target.value); setSelectedPatient(''); }} placeholder="Start typing a patient name, ID, or phone" /></div></div>
-        <div className="patient-choice-list span-2">{possiblePatients.slice(0, 4).map((patient) => <button type="button" key={patient.id} className={`patient-choice${selectedPatient === patient.id ? ' active' : ''}`} onClick={() => setSelectedPatient(patient.id)}><PatientAvatar name={patient.fullName} /><span><strong>{patient.fullName}</strong><small>{patient.id} · {patient.phone}</small></span>{selectedPatient === patient.id && <Check size={17} />}</button>)}{!possiblePatients.length && <p className="field-hint">No matching demo patients found. Choose “New patient” to register a fictional demo record.</p>}</div>
+        <div className="patient-choice-list span-2">{possiblePatients.slice(0, 4).map((patient) => <button type="button" key={patient.id} className={`patient-choice${selectedPatient === patient.id ? ' active' : ''}`} onClick={() => setSelectedPatient(patient.id)}><PatientAvatar name={patient.fullName} /><span><strong>{patient.fullName}</strong><small>{patient.id} · {patient.phone}</small></span>{selectedPatient === patient.id && <Check size={17} />}</button>)}{!possiblePatients.length && <p className="field-hint">No matching patients found. Choose “New patient” to register a new record.</p>}</div>
       </div> : <div className="form-grid three">
         <Field id="fullName" label="Full name" required maxLength={60} placeholder="Patient's full name" error={errors.fullName?.message as string} {...register('fullName')} />
         <Field id="dateOfBirth" label="Date of birth" type="date" required max={format(new Date(), 'yyyy-MM-dd')} min="1900-01-01" error={errors.dateOfBirth?.message as string} {...register('dateOfBirth')} />
@@ -198,12 +201,11 @@ export function QueuePage() {
         <Field id="emergencyContact" label="Emergency contact" type="text" maxLength={60} placeholder="Contact name or phone" {...register('emergencyContact')} />
         <Field id="address" label="Address" required maxLength={150} placeholder="Street address, locality, city" error={errors.address?.message as string} className="span-3" {...register('address')} />
       </div>}
-      <hr className="divider" /><div className="form-grid three">
+      <hr className="divider" /><div className="form-grid two">
         <div className="field"><label htmlFor="queue-department">Department</label><select id="queue-department" className="control" value={department} onChange={(event) => changeDepartment(event.target.value as Department)}><option value="skin">Skin / Dermatology</option><option value="orthopaedics">Orthopaedics</option></select></div>
-        <div className="field"><label htmlFor="queue-doctor">Doctor</label><select id="queue-doctor" className="control" value={doctor} onChange={(event) => setDoctor(event.target.value)}>{doctors[department].map((name) => <option key={name}>{name}</option>)}</select></div>
         <div className="field"><label htmlFor="queue-visit-type">Visit type</label><select id="queue-visit-type" className="control" value={visitType} onChange={(event) => setVisitType(event.target.value as VisitType)}><option>New</option><option>Follow-up</option><option>Walk-in</option></select></div>
-        <TextAreaField id="queue-description" label="Description" placeholder="Enter description" maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} className="span-3" />
-        <div className="field span-3"><label>Reception-entered vitals (optional)</label><div className="vitals-entry-grid">{vitalFields.map(({ key, label, placeholder }) => <div className="field" key={key}><label htmlFor={`queue-vital-${key}`}>{label}</label><input id={`queue-vital-${key}`} className="control" value={vitals[key]} placeholder={placeholder} onChange={(event) => setVitals((current) => ({ ...current, [key]: event.target.value }))} /></div>)}</div><span className="field-hint">Demo measurements are shared with the selected department’s clinical workspace; verify all values in real care workflows.</span></div>
+        <TextAreaField id="queue-description" label="Description" placeholder="Enter description" maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} className="span-2" />
+        <div className="field span-2"><label>Reception-entered vitals (optional)</label><div className="vitals-entry-grid">{vitalFields.map(({ key, label, placeholder }) => <div className="field" key={key}><label htmlFor={`queue-vital-${key}`}>{label}</label><input id={`queue-vital-${key}`} className="control" value={vitals[key]} placeholder={placeholder} onChange={(event) => setVitals((current) => ({ ...current, [key]: event.target.value }))} /></div>)}</div></div>
       </div>
       <div className="button-row" style={{ marginTop: 16 }}><Button onClick={flow === 'existing' ? addExisting : addNew} disabled={isSubmitting} icon={<Plus size={15} />}>{isSubmitting ? 'Saving…' : 'Add to queue'}</Button><Button variant="secondary" onClick={() => setFlow(null)}>Cancel</Button></div>
     </Card>}

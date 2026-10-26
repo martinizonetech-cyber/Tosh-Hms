@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bone, CheckSquare, Pill, Plus, Printer, Save, Square } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Bone, CheckSquare, Edit2, Pill, Plus, Printer, Save, Square, Trash2 } from 'lucide-react';
 import type { BodyRegionTemplateData, Consultation, PrescriptionItem } from '../../../types/domain';
-import type { BodyRegionDefinition } from './bodyRegionTemplates';
-import { fetchBodyRegionTemplates, readBodyRegionTemplates, saveBodyRegionTemplates } from './bodyRegionTemplates';
+import type { BodyRegionDefinition, BodyRegionMedication } from './bodyRegionTemplates';
+import {
+  fetchBodyRegionTemplates,
+  readBodyRegionTemplates,
+  saveBodyRegionTemplates,
+  TEMPLATES_UPDATED_EVENT,
+} from './bodyRegionTemplates';
 import { useToast } from '../../../components/ui/Toast';
 import { dateLabel } from '../../../utils/format';
 import { Button } from '../../../components/ui/Button';
 import { Card, SectionHeading } from '../../../components/ui/Card';
 import { Field, TextAreaField } from '../../../components/ui/Field';
 import { Modal } from '../../../components/ui/Modal';
+
 
 const emptyTemplate = (region: string, side: BodyRegionTemplateData['side']): BodyRegionTemplateData => ({
   region,
@@ -32,20 +39,44 @@ export function BodyRegionTemplatesPanel({
   onSelectTab?: (tab: string) => void;
 }) {
   const toast = useToast();
+  const navigate = useNavigate();
   const [templates, setTemplates] = useState<BodyRegionDefinition[]>(() => readBodyRegionTemplates());
   const [preview, setPreview] = useState(false);
   const [addingRegion, setAddingRegion] = useState(false);
   const [newRegionName, setNewRegionName] = useState('');
+  const [newRegionFields, setNewRegionFields] = useState<string[]>([]);
+  const [addingMed, setAddingMed] = useState(false);
+  const [newMedData, setNewMedData] = useState<BodyRegionMedication>({
+    id: '',
+    medicineName: '',
+    strength: '',
+    dosage: '1 Tab',
+    route: 'Oral',
+    frequency: 'Twice daily (BD)',
+    duration: '5 Days',
+    instructions: 'Take after meals',
+  });
 
   // Fetch latest templates from API or local storage
   useEffect(() => {
     let mounted = true;
     fetchBodyRegionTemplates().then((data) => {
-      if (mounted && data && data.length > 0) {
+      if (mounted && Array.isArray(data)) {
         setTemplates(data);
       }
     }).catch(() => {});
     return () => { mounted = false; };
+  }, []);
+
+  // Sync templates across components when updated
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (Array.isArray(e.detail)) {
+        setTemplates(e.detail);
+      }
+    };
+    window.addEventListener(TEMPLATES_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(TEMPLATES_UPDATED_EVENT, handler);
   }, []);
 
   const selectedRegion = consultation.bodyRegionTemplate?.region ?? '';
@@ -64,10 +95,10 @@ export function BodyRegionTemplatesPanel({
     }
   }, [definition]);
 
-  const chooseRegion = (region: string) => {
-    if (current && Object.values(current.examinationFields).some(Boolean) && !window.confirm('Switch region and start a new template section? Unsaved template field values will be replaced.')) return;
+  const chooseRegion = (region: string, defOverride?: BodyRegionDefinition) => {
+    if (current && Object.values(current.examinationFields).some(Boolean) && !defOverride && !window.confirm('Switch region and start a new template section? Unsaved template field values will be replaced.')) return;
     const side = consultation.side ?? 'Not applicable';
-    const chosenDef = templates.find((t) => t.region === region);
+    const chosenDef = defOverride || templates.find((t) => t.region === region);
     onChange({ painLocation: region, bodyRegionTemplate: emptyTemplate(region, side) });
     if (chosenDef?.medications) {
       setSelectedMedIds(new Set(chosenDef.medications.map((m) => m.id)));
@@ -85,34 +116,85 @@ export function BodyRegionTemplatesPanel({
       return;
     }
 
-    const cleanId = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const cleanFields = newRegionFields.map((f) => f.trim()).filter(Boolean);
     const newRegionDef: BodyRegionDefinition = {
       region: trimmed,
-      fields: ['Range of motion', 'Stability & alignment', 'Swelling & tenderness', 'Functional movements'],
-      medications: [
-        { id: `${cleanId}-1`, medicineName: 'Tab. Aceclofenac + Paracetamol', strength: '100mg / 325mg', dosage: '1 Tab', route: 'Oral', frequency: 'Twice daily (BD)', duration: '5 Days', instructions: 'Take after meals' },
-        { id: `${cleanId}-2`, medicineName: 'Tab. Pantoprazole', strength: '40mg', dosage: '1 Tab', route: 'Oral', frequency: 'Once daily (OD)', duration: '5 Days', instructions: 'Take in morning before food' },
-        { id: `${cleanId}-3`, medicineName: 'Tab. Thiocolchicoside', strength: '4mg', dosage: '1 Tab', route: 'Oral', frequency: 'Twice daily (BD)', duration: '5 Days', instructions: 'Take after meals for muscle relaxation' },
-        { id: `${cleanId}-4`, medicineName: 'Tab. Calcium Carbonate + Vitamin D3', strength: '500mg / 250IU', dosage: '1 Tab', route: 'Oral', frequency: 'Once daily (OD)', duration: '30 Days', instructions: 'Take after dinner' },
-        { id: `${cleanId}-5`, medicineName: 'Tab. Serratiopeptidase', strength: '10mg', dosage: '1 Tab', route: 'Oral', frequency: 'Twice daily (BD)', duration: '5 Days', instructions: 'Take before meals for swelling' },
-        { id: `${cleanId}-6`, medicineName: 'Gel. Diclofenac Diethylamine', strength: '1.16% w/w', dosage: 'Thin layer', route: 'Topical', frequency: '3 times daily (TDS)', duration: '7 Days', instructions: 'Apply gently over painful area' },
-        { id: `${cleanId}-7`, medicineName: 'Tab. Paracetamol', strength: '650mg', dosage: '1 Tab', route: 'Oral', frequency: 'SOS', duration: '5 Days', instructions: 'Take as needed for pain' },
-        { id: `${cleanId}-8`, medicineName: 'Sachet. Cholecalciferol (Vitamin D3)', strength: '60,000 IU', dosage: '1 Sachet', route: 'Oral', frequency: 'Once weekly', duration: '8 Weeks', instructions: 'Take weekly with warm milk' },
-        { id: `${cleanId}-9`, medicineName: 'Tab. Methylcobalamin', strength: '1500mcg', dosage: '1 Tab', route: 'Oral', frequency: 'Once daily (OD)', duration: '30 Days', instructions: 'Take after breakfast for nerve health' },
-        { id: `${cleanId}-10`, medicineName: 'Tab. Tramadol + Paracetamol', strength: '37.5mg / 325mg', dosage: '1 Tab', route: 'Oral', frequency: 'SOS', duration: '3 Days', instructions: 'Take in case of severe pain only' },
-      ],
+      fields: cleanFields,
+      medications: [],
     };
 
     const next = [...templates, newRegionDef];
     setTemplates(next);
     setAddingRegion(false);
     setNewRegionName('');
-    chooseRegion(trimmed);
+    setNewRegionFields([]);
+    chooseRegion(trimmed, newRegionDef);
     try {
       await saveBodyRegionTemplates(next);
-      toast.push(`Body region "${trimmed}" added with 10 standard tablets.`);
+      toast.push(`Body region "${trimmed}" created successfully.`);
     } catch {
       toast.push(`Body region "${trimmed}" added locally.`, 'info');
+    }
+  };
+
+  const handleSaveNewMed = async () => {
+    if (!definition) return;
+    if (!newMedData.medicineName.trim()) {
+      toast.push('Please enter a medicine / tablet name.', 'error');
+      return;
+    }
+    const medToAdd: BodyRegionMedication = {
+      ...newMedData,
+      id: `med-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      medicineName: newMedData.medicineName.trim(),
+    };
+    const currentMeds = definition.medications || [];
+    const updatedDef: BodyRegionDefinition = {
+      ...definition,
+      medications: [...currentMeds, medToAdd],
+    };
+    const next = templates.map((t) => (t.region === definition.region ? updatedDef : t));
+    setTemplates(next);
+    setSelectedMedIds((prev) => new Set([...prev, medToAdd.id]));
+    setAddingMed(false);
+    setNewMedData({
+      id: '',
+      medicineName: '',
+      strength: '',
+      dosage: '1 Tab',
+      route: 'Oral',
+      frequency: 'Twice daily (BD)',
+      duration: '5 Days',
+      instructions: 'Take after meals',
+    });
+    try {
+      await saveBodyRegionTemplates(next);
+      toast.push(`Added "${medToAdd.medicineName}" to ${definition.region}.`);
+    } catch {
+      toast.push(`Added "${medToAdd.medicineName}" locally.`, 'info');
+    }
+  };
+
+  const handleAddFieldToCurrentRegion = async () => {
+    if (!definition) return;
+    const promptName = window.prompt(`Add new examination field for ${definition.region}:`);
+    if (!promptName || !promptName.trim()) return;
+    const trimmedPrompt = promptName.trim();
+    if (definition.fields.includes(trimmedPrompt)) {
+      toast.push(`Field "${trimmedPrompt}" already exists in ${definition.region}.`, 'info');
+      return;
+    }
+    const updatedDef = {
+      ...definition,
+      fields: [...definition.fields, trimmedPrompt],
+    };
+    const next = templates.map((t) => (t.region === definition.region ? updatedDef : t));
+    setTemplates(next);
+    try {
+      await saveBodyRegionTemplates(next);
+      toast.push(`Added field "${trimmedPrompt}" to ${definition.region}.`);
+    } catch {
+      toast.push(`Field "${trimmedPrompt}" added locally.`, 'info');
     }
   };
 
@@ -297,7 +379,7 @@ export function BodyRegionTemplatesPanel({
                       onClick={toggleSelectAllMeds}
                       icon={allMedsSelected ? <CheckSquare size={14} color="#177E89" /> : <Square size={14} />}
                     >
-                      {allMedsSelected ? 'Deselect All' : 'Select All (10)'}
+                      {allMedsSelected ? 'Deselect All' : `Select All (${definition.medications.length})`}
                     </Button>
                     <Button
                       size="small"
@@ -306,6 +388,14 @@ export function BodyRegionTemplatesPanel({
                       icon={<Pill size={14} />}
                     >
                       Add Selected ({selectedMedIds.size}) to Prescription
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      onClick={() => setAddingMed(true)}
+                      icon={<Plus size={14} />}
+                    >
+                      Add Tablet
                     </Button>
                     {onPrintPrescription && (
                       <Button
@@ -381,6 +471,53 @@ export function BodyRegionTemplatesPanel({
               </div>
             )}
 
+            {/* When no tablets configured yet */}
+            {(!definition?.medications || definition.medications.length === 0) && (
+              <div
+                style={{
+                  border: '1px dashed #CBD5E1',
+                  borderRadius: 10,
+                  padding: 12,
+                  background: '#F8FAFC',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 12,
+                  marginTop: 6,
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <Pill size={16} color="#64748B" />
+                    <strong style={{ fontSize: 13, color: 'var(--navy)' }}>
+                      No tablets configured for {current.region}
+                    </strong>
+                  </div>
+                  <p style={{ margin: '3px 0 0', fontSize: 11.5, color: '#64748B' }}>
+                    Tablets are created manually for this region template.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={() => setAddingMed(true)}
+                    icon={<Plus size={13} />}
+                  >
+                    Add Tablet
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="ghost"
+                    onClick={() => navigate('/doctor/body-regions')}
+                    icon={<Edit2 size={13} />}
+                  >
+                    Manage
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div className="body-region-fields">
               {(definition?.fields ?? []).map((field, index) => (
                 <Field
@@ -392,6 +529,25 @@ export function BodyRegionTemplatesPanel({
                   placeholder="Doctor-entered examination"
                 />
               ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, marginBottom: 12 }}>
+              <Button
+                variant="ghost"
+                size="small"
+                onClick={handleAddFieldToCurrentRegion}
+                icon={<Plus size={13} />}
+              >
+                Add examination field
+              </Button>
+              <Button
+                variant="ghost"
+                size="small"
+                onClick={() => navigate('/ortho/templates')}
+                icon={<Edit2 size={13} />}
+              >
+                Customize all templates
+              </Button>
             </div>
 
             <TextAreaField
@@ -474,7 +630,7 @@ export function BodyRegionTemplatesPanel({
           <article className="body-template-print">
             <div className="print-brand">
               <strong>TOSH Foundation</strong>
-              <span>Orthopaedics · Pune</span>
+              <span>Orthopaedics · Trichy</span>
             </div>
             <h2>
               {current.region} · {current.side}
@@ -516,11 +672,22 @@ export function BodyRegionTemplatesPanel({
       <Modal
         open={addingRegion}
         title="Add New Body Region"
-        subtitle="Create a new orthopaedic region template with customizable fields and 10 default tablets."
-        onClose={() => setAddingRegion(false)}
+        subtitle="Create a new orthopaedic region template with customizable examination fields and manually added tablets."
+        onClose={() => {
+          setAddingRegion(false);
+          setNewRegionName('');
+          setNewRegionFields([]);
+        }}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setAddingRegion(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setAddingRegion(false);
+                setNewRegionName('');
+                setNewRegionFields([]);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={handleAddRegion} icon={<Plus size={14} />}>
@@ -529,21 +696,189 @@ export function BodyRegionTemplatesPanel({
           </>
         }
       >
-        <div className="field">
-          <label htmlFor="consultation-new-region-name">Body Region Name *</label>
-          <input
-            id="consultation-new-region-name"
-            className="control"
-            placeholder="e.g. Cervical Spine, Lumbar Spine, Sacroiliac Joint, Clavicle..."
-            value={newRegionName}
-            onChange={(e) => setNewRegionName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAddRegion();
-            }}
-            autoFocus
-          />
+        <div className="stack" style={{ gap: 14 }}>
+          <div className="field">
+            <label htmlFor="consultation-new-region-name">Body Region Name *</label>
+            <input
+              id="consultation-new-region-name"
+              className="control"
+              placeholder="e.g. Cervical Spine, Lumbar Spine, Sacroiliac Joint, Clavicle..."
+              value={newRegionName}
+              onChange={(e) => setNewRegionName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddRegion();
+              }}
+            />
+          </div>
+
+          <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 12, background: '#FAFCFC' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div>
+                <strong style={{ fontSize: 13, color: 'var(--navy)' }}>Customizable Examination Prompts</strong>
+                <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)' }}>
+                  Add examination fields for this new region (optional).
+                </p>
+              </div>
+              <Button
+                size="small"
+                variant="secondary"
+                type="button"
+                onClick={() => setNewRegionFields((prev) => [...prev, ''])}
+                icon={<Plus size={13} />}
+              >
+                Add Field
+              </Button>
+            </div>
+            {newRegionFields.length === 0 ? (
+              <p style={{ fontSize: 11.5, color: '#64748B', margin: '6px 0 2px', fontStyle: 'italic' }}>
+                No examination fields added yet. Click &ldquo;+ Add Field&rdquo; to add custom examination prompts.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gap: 7, maxHeight: 180, overflowY: 'auto' }}>
+                {newRegionFields.map((field, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      className="control"
+                      style={{ flex: 1, height: 32, fontSize: 12 }}
+                      value={field}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewRegionFields((prev) => prev.map((f, i) => (i === idx ? val : f)));
+                      }}
+                      placeholder={`Examination field #${idx + 1} (e.g. Tenderness, Range of motion...)`}
+                    />
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      type="button"
+                      onClick={() => setNewRegionFields((prev) => prev.filter((_, i) => i !== idx))}
+                      icon={<Trash2 size={13} color="#DC2626" />}
+                      aria-label="Remove field"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: 12, background: '#F8FAFC' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+              <Pill size={15} color="#64748B" />
+              <strong style={{ fontSize: 13, color: 'var(--navy)' }}>Tablets (Created Manually)</strong>
+            </div>
+            <p style={{ fontSize: 11.5, color: '#64748B', margin: 0 }}>
+              Tablets are not pre-configured. You can manually create and customize tablets for this region after adding it.
+            </p>
+          </div>
         </div>
       </Modal>
+
+      {/* Add Tablet Modal for Current Region */}
+      {addingMed && (
+        <Modal
+          open={addingMed}
+          title={`Add Tablet - ${current?.region ?? 'Region'}`}
+          subtitle="Configure medicine name, dosage, frequency, and instructions for this region template."
+          onClose={() => setAddingMed(false)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setAddingMed(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveNewMed} icon={<Plus size={14} />}>
+                Add Tablet
+              </Button>
+            </>
+          }
+        >
+          <div className="form-grid">
+            <div className="field span-2">
+              <label htmlFor="panel-new-med-name">Medicine / Tablet Name *</label>
+              <input
+                id="panel-new-med-name"
+                className="control"
+                placeholder="e.g. Tab. Aceclofenac + Paracetamol, Tab. Pantoprazole..."
+                value={newMedData.medicineName}
+                onChange={(e) => setNewMedData((prev) => ({ ...prev, medicineName: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="panel-new-med-strength">Strength</label>
+              <input
+                id="panel-new-med-strength"
+                className="control"
+                placeholder="e.g. 100mg / 325mg, 40mg..."
+                value={newMedData.strength}
+                onChange={(e) => setNewMedData((prev) => ({ ...prev, strength: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="panel-new-med-dosage">Dosage</label>
+              <input
+                id="panel-new-med-dosage"
+                className="control"
+                placeholder="e.g. 1 Tab, 1 Cap, 1 Sachet..."
+                value={newMedData.dosage}
+                onChange={(e) => setNewMedData((prev) => ({ ...prev, dosage: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="panel-new-med-freq">Frequency</label>
+              <select
+                id="panel-new-med-freq"
+                className="control"
+                value={newMedData.frequency}
+                onChange={(e) => setNewMedData((prev) => ({ ...prev, frequency: e.target.value }))}
+              >
+                <option>Once daily (OD)</option>
+                <option>Once daily in morning (OD - AM)</option>
+                <option>Once daily at night (HS)</option>
+                <option>Twice daily (BD)</option>
+                <option>3 times daily (TDS)</option>
+                <option>4 times daily (QDS)</option>
+                <option>SOS (As needed)</option>
+                <option>Once weekly</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="panel-new-med-duration">Duration</label>
+              <input
+                id="panel-new-med-duration"
+                className="control"
+                placeholder="e.g. 5 Days, 10 Days, 30 Days..."
+                value={newMedData.duration}
+                onChange={(e) => setNewMedData((prev) => ({ ...prev, duration: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="panel-new-med-route">Route</label>
+              <select
+                id="panel-new-med-route"
+                className="control"
+                value={newMedData.route}
+                onChange={(e) => setNewMedData((prev) => ({ ...prev, route: e.target.value }))}
+              >
+                <option>Oral</option>
+                <option>Topical</option>
+                <option>Physical</option>
+                <option>Sublingual</option>
+                <option>Intramuscular (IM)</option>
+                <option>Intra-articular</option>
+              </select>
+            </div>
+            <div className="field span-2">
+              <label htmlFor="panel-new-med-instructions">Doctor Instructions / Precautions</label>
+              <input
+                id="panel-new-med-instructions"
+                className="control"
+                placeholder="e.g. Take after food, Apply gently..."
+                value={newMedData.instructions}
+                onChange={(e) => setNewMedData((prev) => ({ ...prev, instructions: e.target.value }))}
+              />
+            </div>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

@@ -11,7 +11,6 @@ interface RoleOption {
   id: PortalRole;
   label: string;
   emoji: string;
-  email: string;
   path: string;
 }
 
@@ -20,30 +19,21 @@ const roles: RoleOption[] = [
     id: 'reception',
     label: 'Reception',
     emoji: '👩‍💼',
-    email: 'reception@northstar.demo',
     path: '/reception/dashboard',
   },
   {
     id: 'skin',
     label: 'Skin',
     emoji: '🩺',
-    email: 'skin@gmail.com',
     path: '/skin/dashboard',
   },
   {
     id: 'orthopaedics',
     label: 'Ortho',
     emoji: '🦴',
-    email: 'ortho@gmail.com',
     path: '/ortho/dashboard',
   },
 ];
-
-const DEFAULT_PASSWORDS: Record<PortalRole, string> = {
-  reception: 'Reception_Pass123!',
-  skin: 'SkinDoctor_Pass123!',
-  orthopaedics: 'OrthoDoctor_Pass123!',
-};
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -52,28 +42,41 @@ export function LoginPage() {
   const [selectedRole, setSelectedRole] = useState<PortalRole>('reception');
   const [doctors, setDoctors] = useState<DoctorRecord[]>([]);
   const isMock = DATA_MODE === 'mock';
-  const [email, setEmail] = useState('reception@northstar.demo');
-  const [password, setPassword] = useState(isMock ? 'password123' : DEFAULT_PASSWORDS.reception);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    fetchDoctors().then((docs) => setDoctors(docs)).catch(() => {});
+    fetchDoctors().then((docs) => {
+      setDoctors(docs);
+      if (selectedRole !== 'reception') {
+        const matching = docs.find((d) => d.department === selectedRole);
+        if (matching?.email && !email) {
+          setEmail(matching.email);
+        }
+      }
+    }).catch(() => {});
   }, []);
 
   const doctorsForDepartment = doctors.filter((d) => d.department === selectedRole);
 
   const handleRoleSelect = (role: RoleOption) => {
     setSelectedRole(role.id);
-    setEmail(role.email);
-    setPassword(isMock ? 'password123' : (DEFAULT_PASSWORDS[role.id] ?? ''));
+    if (role.id === 'reception') {
+      setEmail('');
+    } else {
+      const match = doctors.find((d) => d.department === role.id);
+      setEmail(match?.email || '');
+    }
   };
 
   const handleDoctorChange = (selectedEmail: string) => {
     setEmail(selectedEmail);
-    const targetRole: PortalRole = selectedEmail.includes('skin') ? 'skin' : 'orthopaedics';
-    setSelectedRole(targetRole);
-    setPassword(isMock ? 'password123' : (DEFAULT_PASSWORDS[targetRole] ?? ''));
+    const doc = doctors.find((d) => d.email === selectedEmail);
+    if (doc) {
+      setSelectedRole(doc.department as PortalRole);
+    }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -99,18 +102,15 @@ export function LoginPage() {
           : '/ortho/dashboard';
       navigate(targetPath);
     } catch (error) {
-      const defaultPw = isMock ? 'password123' : DEFAULT_PASSWORDS[selectedRole];
       const errMsg = error instanceof Error ? error.message : 'Login failed. Please check credentials.';
-      toast.push(`${errMsg} Default password: ${defaultPw}`, 'error');
+      toast.push(errMsg, 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleForgotPassword = () => {
-    const defaultPw = isMock ? 'password123' : DEFAULT_PASSWORDS[selectedRole];
-    setPassword(defaultPw);
-    toast.push(`Password filled: ${defaultPw}`, 'info');
+    toast.push('Please contact clinic administration or IT to reset your credentials.', 'info');
   };
 
   return (
@@ -183,14 +183,11 @@ export function LoginPage() {
                     value={email}
                     onChange={(e) => handleDoctorChange(e.target.value)}
                   >
-                    {doctorsForDepartment.map((doc) => {
-                      const docEmail = doc.department === 'skin' ? 'skin@gmail.com' : 'ortho@gmail.com';
-                      return (
-                        <option key={doc.id} value={docEmail}>
-                          {doc.displayName} ({doc.department === 'skin' ? 'Dermatology' : 'Orthopaedics'})
-                        </option>
-                      );
-                    })}
+                    {doctorsForDepartment.map((doc) => (
+                      <option key={doc.id} value={doc.email || ''}>
+                        {doc.displayName} ({doc.department === 'skin' ? 'Dermatology' : 'Orthopaedics'})
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -243,17 +240,6 @@ export function LoginPage() {
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted)', marginTop: '2px', padding: '0 2px' }}>
-                <span>Default: <code style={{ userSelect: 'all', color: 'var(--navy)', fontWeight: 600 }}>{isMock ? 'password123' : DEFAULT_PASSWORDS[selectedRole]}</code></span>
-                <button
-                  type="button"
-                  className="login-forgot-link"
-                  style={{ textDecoration: 'underline' }}
-                  onClick={() => setPassword(isMock ? 'password123' : DEFAULT_PASSWORDS[selectedRole])}
-                >
-                  Use default
                 </button>
               </div>
             </div>

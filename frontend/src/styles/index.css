@@ -1918,6 +1918,39 @@ a:focus:not(:focus-visible) {
   border-radius: 12px
 }
 
+.rx-quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.rx-chip {
+  background: var(--white);
+  color: var(--navy);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  line-height: 1.2;
+}
+
+.rx-chip:hover {
+  background: var(--pale);
+  color: var(--teal);
+  border-color: var(--teal);
+}
+
+.rx-chip.active {
+  background: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
+}
+
 .doctor-rx-cards {
   gap: 10px
 }

@@ -47,10 +47,9 @@ export function PrintLetterhead({
         </div>
 
         <div className="print-letterhead-contacts">
-          <div>Plot 14, Senapati Bapat Road, Pune - 411016</div>
-          <div>Tel: +91 20 6700 8000 · OPD Desk: ext. 102 / 104</div>
-          <div>Emergency: 1066 · care@toshfoundation.org</div>
-          <div className="print-letterhead-reg">Hosp. Reg. No: MAH/PUN/HOSP/2018/4891</div>
+          <div>Trichy Ortho & Skin Health Foundation</div>
+          <div>Cantonment, Tiruchirappalli (Trichy), Tamil Nadu - 620001</div>
+          <div>OPD Desk: +91 431 241 4000 · contact@toshhealth.org</div>
         </div>
       </div>
 
@@ -131,7 +130,7 @@ export function PrintPatientMeta({
         </div>
         <div className="print-meta-item">
           <span className="print-meta-label">Address</span>
-          <span className="print-meta-value">{patient.address || 'Pune, Maharashtra'}</span>
+          <span className="print-meta-value">{patient.address || '—'}</span>
         </div>
       </div>
     </div>

@@ -91,7 +91,7 @@ export function DoctorPatientsPage({ department }: { department: Department }) {
   const { page, setPage, pageSize, setPageSize, pagedItems: paginatedRows, total } = usePagination(patients, 5);
 
   return <>
-    <PageHeading eyebrow={`${department === 'skin' ? 'Skin & Dermatology' : 'Orthopaedics'} · Records`} title="Patients" description="Open authorized fictional history and continue into a consultation workspace." actions={<Badge tone="info">{patients.length} records</Badge>} />
+    <PageHeading eyebrow={`${department === 'skin' ? 'Skin & Dermatology' : 'Orthopaedics'} · Records`} title="Patients" description="Open patient history and continue into a consultation workspace." actions={<Badge tone="info">{patients.length} records</Badge>} />
     <Card padded={false}>
       <div style={{ padding: '20px 24px 0' }}>
         <SectionHeading title="Department patients" subtitle="Patient records created at Reception appear here automatically. Filter by name, phone, or visit date." />

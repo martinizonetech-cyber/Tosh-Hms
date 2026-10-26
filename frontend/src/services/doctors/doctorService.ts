@@ -6,12 +6,10 @@ export interface DoctorRecord {
   id: string;
   displayName: string;
   department: Department;
+  email?: string;
 }
 
-const DEFAULT_DOCTORS: DoctorRecord[] = [
-  { id: 'doc-skin', displayName: 'Dr. Sangamitra', department: 'skin' },
-  { id: 'doc-ortho', displayName: 'Dr. Sundarprakash', department: 'orthopaedics' },
-];
+const DEFAULT_DOCTORS: DoctorRecord[] = [];
 
 let cachedDoctors: DoctorRecord[] | null = null;
 
@@ -23,11 +21,12 @@ export async function fetchDoctors(): Promise<DoctorRecord[]> {
         id: d.id,
         displayName: d.displayName,
         department: d.department,
+        email: d.email,
       }));
       cachedDoctors = mapped;
       return mapped;
     } catch {
-      return DEFAULT_DOCTORS;
+      return cachedDoctors || [];
     }
   }
   return DEFAULT_DOCTORS;
