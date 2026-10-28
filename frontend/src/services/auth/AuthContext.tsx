@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { Department, PortalRole } from '../../types/domain';
-import { getAccessToken, onAuthExpired, requestJson, setAccessToken } from '../api/httpClient';
+import { getAccessToken, getRefreshToken, onAuthExpired, requestJson, setAccessToken, setRefreshToken } from '../api/httpClient';
 import { DATA_MODE } from '../repositories/mode';
 
 export interface AuthUser {
@@ -16,6 +16,7 @@ export interface AuthUser {
 interface LoginResponse {
   accessToken: string;
   tokenType: string;
+  refreshToken?: string;
   user: AuthUser;
 }
 
@@ -69,8 +70,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
           }
         }
 
-        // If on the login root and no prior token exists, don't probe /auth/refresh to avoid harmless 401 log
-        if (!existingToken && (window.location.pathname === '/' || window.location.pathname === '')) {
+        // If on public routes and no prior token exists, don't probe /auth/refresh to avoid harmless 401 log
+        const isPublicPath =
+          window.location.pathname === '/' ||
+          window.location.pathname === '' ||
+          window.location.pathname === '/landing' ||
+          window.location.pathname === '/login';
+
+        if (!existingToken && isPublicPath) {
           if (isMounted) {
             setUser(null);
             setIsLoading(false);
@@ -78,17 +85,23 @@ export function AuthProvider({ children }: PropsWithChildren) {
           return;
         }
 
-        // Step 2: POST /auth/refresh using httpOnly cookie
-        const refreshRes = await requestJson<{ accessToken: string; user: AuthUser }>('/auth/refresh', {
+        // Step 2: POST /auth/refresh using fallback body refresh token + cookie
+        const storedRefreshToken = getRefreshToken();
+        const refreshRes = await requestJson<{ accessToken: string; refreshToken?: string; user: AuthUser }>('/auth/refresh', {
           method: 'POST',
+          body: storedRefreshToken ? JSON.stringify({ refreshToken: storedRefreshToken }) : undefined,
         });
         setAccessToken(refreshRes.accessToken);
+        if (refreshRes.refreshToken) {
+          setRefreshToken(refreshRes.refreshToken);
+        }
 
         // Step 3: GET /auth/me to verify user profile
         const me = await requestJson<AuthUser>('/auth/me');
         if (isMounted) setUser(me);
       } catch {
         setAccessToken(null);
+        setRefreshToken(null);
         if (isMounted) setUser(null);
       } finally {
         if (isMounted) setIsLoading(false);
@@ -97,7 +110,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     const unsubscribe = onAuthExpired(() => {
       setUser(null);
-      navigate('/', { replace: true });
+      navigate('/login', { replace: true });
     });
 
     restoreSession();
@@ -128,6 +141,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     });
 
     setAccessToken(response.accessToken);
+    if (response.refreshToken) {
+      setRefreshToken(response.refreshToken);
+    }
     setUser(response.user);
     return response.user;
   };
@@ -135,15 +151,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const logout = async (): Promise<void> => {
     if (DATA_MODE === 'api') {
       try {
-        await requestJson('/auth/logout', { method: 'POST' });
+        const storedRefreshToken = getRefreshToken();
+        await requestJson('/auth/logout', {
+          method: 'POST',
+          body: storedRefreshToken ? JSON.stringify({ refreshToken: storedRefreshToken }) : undefined,
+        });
       } catch {
         // ignore logout network errors
       }
       setAccessToken(null);
+      setRefreshToken(null);
     }
     sessionStorage.removeItem('carehub-demo-role');
     setUser(null);
-    navigate('/');
+    navigate('/login');
   };
 
   const role = user?.role ?? 'reception';
@@ -173,12 +194,29 @@ export function RouteGuard({ children }: PropsWithChildren) {
   useEffect(() => {
     if (isLoading) return;
 
-    if (location.pathname === '/') {
+    const isPublic =
+      location.pathname === '/' ||
+      location.pathname === '/landing' ||
+      location.pathname === '/login';
+
+    // If logged in staff visits /login, send them straight to their clinical workspace
+    if (location.pathname === '/login' && user) {
+      const targetPath =
+        role === 'reception'
+          ? '/reception/dashboard'
+          : role === 'skin'
+            ? '/skin/dashboard'
+            : '/ortho/dashboard';
+      navigate(targetPath, { replace: true });
+      return;
+    }
+
+    if (isPublic) {
       return;
     }
 
     if (!user) {
-      navigate('/', { replace: true });
+      navigate('/login', { replace: true });
       return;
     }
 

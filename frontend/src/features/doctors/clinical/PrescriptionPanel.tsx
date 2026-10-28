@@ -1,18 +1,23 @@
 import { useRef, useState, useMemo, useEffect } from 'react';
 import {
+  AlertCircle,
   Bone,
+  Camera,
   Check,
   CheckSquare,
   ClipboardList,
   Download,
   Edit2,
   Edit3,
+  ExternalLink,
   Eye,
   FileText,
   Image as ImageIcon,
   Pill,
   Plus,
   Printer,
+  RefreshCw,
+  RotateCcw,
   Search,
   Square,
   Trash2,
@@ -29,7 +34,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { createPrescriptionImage, isImageFile } from '../../../services/documents/browserDocumentService';
 import { useHospitalData } from '../../../services/mock/DemoProvider';
 import { DATA_MODE } from '../../../services/repositories/mode';
-import { dateLabel, resolveDocumentUrl } from '../../../utils/format';
+import { dateLabel, downloadFile, fetchPdfBlobUrl, resolveDocumentUrl, resolveInlineDocumentUrl } from '../../../utils/format';
 
 type PrescriptionMode = 'manual' | 'upload' | 'templates';
 
@@ -176,7 +181,79 @@ export function PrescriptionPanel({
   const [imageDragging, setImageDragging] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [previewImage, setPreviewImage] = useState<PrescriptionImage | null>(null);
+  const [pdfPreviewBlobUrl, setPdfPreviewBlobUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfLoadError, setPdfLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  // PDF Preview Blob generator to guarantee cross-browser inline rendering
+  useEffect(() => {
+    let active = true;
+    let createdBlobUrl: string | null = null;
+
+    if (!previewImage) {
+      setPdfPreviewBlobUrl(null);
+      setPdfLoadError(null);
+      setPdfLoading(false);
+      return;
+    }
+
+    const isPdf =
+      previewImage.mimeType === 'application/pdf' ||
+      previewImage.name.toLowerCase().endsWith('.pdf');
+
+    if (!isPdf) {
+      setPdfPreviewBlobUrl(null);
+      setPdfLoadError(null);
+      setPdfLoading(false);
+      return;
+    }
+
+    setPdfLoading(true);
+    setPdfLoadError(null);
+
+    const preparePdfUrl = async () => {
+      try {
+        const url = await fetchPdfBlobUrl(previewImage);
+        if (!active) {
+          if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
+          return;
+        }
+        if (url && url.startsWith('blob:')) {
+          createdBlobUrl = url;
+        }
+        setPdfPreviewBlobUrl(url);
+        setPdfLoading(false);
+      } catch (err) {
+        if (active) {
+          const directUrl = resolveDocumentUrl(previewImage);
+          setPdfPreviewBlobUrl(directUrl);
+          setPdfLoadError(err instanceof Error ? err.message : 'Could not prepare inline PDF preview.');
+          setPdfLoading(false);
+        }
+      }
+    };
+
+    preparePdfUrl();
+
+    return () => {
+      active = false;
+      if (createdBlobUrl) {
+        URL.revokeObjectURL(createdBlobUrl);
+      }
+    };
+  }, [previewImage]);
+
+  // Camera capture state
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [capturedPhotoUrl, setCapturedPhotoUrl] = useState<string | null>(null);
+  const [capturedFile, setCapturedFile] = useState<File | null>(null);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const prescriptionImages = consultation.prescriptionImages ?? [];
   const hasPrescriptionContent = consultation.prescription.length > 0 || prescriptionImages.length > 0;
@@ -408,16 +485,145 @@ export function PrescriptionPanel({
     }
   };
 
+  // Camera stream lifecycle
+  useEffect(() => {
+    if (!showCamera) {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((t) => t.stop());
+        setCameraStream(null);
+      }
+      setCapturedPhotoUrl(null);
+      setCapturedFile(null);
+      setCameraError(null);
+      return;
+    }
+
+    let active = true;
+    setCameraError(null);
+
+    const startCamera = async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('Camera is not supported on this browser or requires HTTPS/localhost.');
+        }
+
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: facingMode },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+            audio: false,
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
+
+        if (!active) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
+        setCameraStream(stream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+      } catch (err) {
+        if (!active) return;
+        const msg = err instanceof Error ? err.message : 'Unable to access camera device.';
+        setCameraError(msg);
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      active = false;
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, [showCamera, facingMode]);
+
+  const capturePhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    setCapturedPhotoUrl(dataUrl);
+
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const file = new File([blob], `Prescription_Camera_${timestamp}.jpg`, {
+          type: 'image/jpeg',
+        });
+        setCapturedFile(file);
+      }
+    }, 'image/jpeg', 0.92);
+  };
+
+  const retakePhoto = () => {
+    setCapturedPhotoUrl(null);
+    setCapturedFile(null);
+    if (videoRef.current && cameraStream) {
+      videoRef.current.srcObject = cameraStream;
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
+  const uploadCapturedPhoto = async () => {
+    if (!capturedFile) {
+      toast.push('No photo captured to upload.', 'error');
+      return;
+    }
+    const fileList = [capturedFile] as unknown as FileList;
+    setShowCamera(false);
+    await handleImageFiles(fileList);
+  };
+
+  const closeCameraModal = () => {
+    setShowCamera(false);
+  };
+
+  const handleDownload = async (img: PrescriptionImage) => {
+    const fileUrl = resolveDocumentUrl(img);
+    if (!fileUrl) {
+      toast.push('No file URL available to download.', 'error');
+      return;
+    }
+    try {
+      await downloadFile(fileUrl, img.name);
+      toast.push(`Downloaded ${img.name}`, 'success');
+    } catch (err) {
+      toast.push(err instanceof Error ? err.message : 'Could not download file.', 'error');
+    }
+  };
+
   const removeImage = async (id: string, name: string) => {
     if (!window.confirm(`Remove prescription file "${name}"?`)) return;
     try {
-      if (DATA_MODE === 'api' && repository.deleteDocument) {
-        await repository.deleteDocument(id);
+      if (DATA_MODE === 'api' && repository.deleteDocument && !id.startsWith('RX-FILE-')) {
+        try {
+          await repository.deleteDocument(id);
+        } catch (apiErr) {
+          console.warn('Backend delete document notice:', apiErr);
+        }
       }
       onChange({ prescriptionImages: prescriptionImages.filter((img) => img.id !== id) });
       toast.push('Prescription file removed.');
     } catch (error) {
-      toast.push(error instanceof Error ? error.message : 'Could not remove prescription file.', 'error');
+      onChange({ prescriptionImages: prescriptionImages.filter((img) => img.id !== id) });
+      toast.push('Prescription file removed.');
     }
   };
 
@@ -617,17 +823,10 @@ export function PrescriptionPanel({
 
             {/* Entry Form */}
             <form onSubmit={handleFormSubmit}>
-              {/* Row 1: Medicine name, Strength / dosage, Dosage form, Route */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-                  gap: 14,
-                  marginBottom: 16,
-                }}
-              >
+              {/* Row 1: Medicine name, Strength / dosage, Dosage form (3 equal columns) */}
+              <div className="rx-form-grid-3">
                 {/* Medicine Name */}
-                <div style={{ minWidth: 220 }}>
+                <div>
                   <label
                     htmlFor="rx-input-med-name"
                     style={{ fontSize: 12.5, fontWeight: 600, color: '#1E293B', display: 'block', marginBottom: 6 }}
@@ -644,19 +843,20 @@ export function PrescriptionPanel({
                         transform: 'translateY(-50%)',
                         color: '#94A3B8',
                         pointerEvents: 'none',
+                        zIndex: 1,
                       }}
                     />
                     <input
                       id="rx-input-med-name"
                       type="text"
-                      className="control"
+                      className="control rx-med-search-input"
                       value={formState.medicineName}
                       onChange={(e) => setFormState({ ...formState, medicineName: e.target.value })}
-                      placeholder="Search or enter medicine name (e.g. Paracetamol)"
+                      placeholder="Search medicine (e.g. Paracetamol)"
                       list="rx-common-medicines"
                       style={{
                         height: 42,
-                        paddingLeft: 36,
+                        paddingLeft: 38,
                         paddingRight: 12,
                         fontSize: 13.5,
                         borderRadius: 8,
@@ -724,7 +924,10 @@ export function PrescriptionPanel({
                     ))}
                   </select>
                 </div>
+              </div>
 
+              {/* Row 2: Route, Frequency, Duration (3 equal columns) */}
+              <div className="rx-form-grid-3">
                 {/* Route */}
                 <div>
                   <label
@@ -755,17 +958,7 @@ export function PrescriptionPanel({
                     ))}
                   </select>
                 </div>
-              </div>
 
-              {/* Row 2: Frequency, Duration, Instructions */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-                  gap: 14,
-                  marginBottom: 18,
-                }}
-              >
                 {/* Frequency */}
                 <div>
                   <label
@@ -827,99 +1020,128 @@ export function PrescriptionPanel({
                     ))}
                   </select>
                 </div>
-
-                {/* Instructions */}
-                <div style={{ gridColumn: 'span 1' }}>
-                  <label
-                    htmlFor="rx-input-instructions"
-                    style={{ fontSize: 12.5, fontWeight: 600, color: '#1E293B', display: 'block', marginBottom: 6 }}
-                  >
-                    Instructions
-                  </label>
-                  <input
-                    id="rx-input-instructions"
-                    type="text"
-                    className="control"
-                    value={formState.instructions}
-                    onChange={(e) => setFormState({ ...formState, instructions: e.target.value })}
-                    placeholder="e.g. Take after meals"
-                    list="rx-instructions"
-                    style={{
-                      height: 42,
-                      padding: '0 12px',
-                      fontSize: 13.5,
-                      borderRadius: 8,
-                      border: '1px solid #CBD5E1',
-                      width: '100%',
-                    }}
-                  />
-                </div>
               </div>
 
-              {/* Row 3: Quick Instruction Chips + Add Button */}
+              {/* Row 3: Instructions (full width across all columns) */}
+              <div style={{ marginBottom: 12 }}>
+                <label
+                  htmlFor="rx-input-instructions"
+                  style={{ fontSize: 12.5, fontWeight: 600, color: '#1E293B', display: 'block', marginBottom: 6 }}
+                >
+                  Instructions <span style={{ fontSize: 12, fontWeight: 400, color: '#64748B' }}>(optional)</span>
+                </label>
+                <input
+                  id="rx-input-instructions"
+                  type="text"
+                  className="control"
+                  value={formState.instructions}
+                  onChange={(e) => setFormState({ ...formState, instructions: e.target.value })}
+                  placeholder="e.g. 1 tablet after meals, with plenty of water"
+                  list="rx-instructions"
+                  style={{
+                    height: 42,
+                    padding: '0 12px',
+                    fontSize: 13.5,
+                    borderRadius: 8,
+                    border: '1px solid #CBD5E1',
+                    width: '100%',
+                  }}
+                />
+              </div>
+
+              {/* Row 4: Quick Instruction Chips */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: '#64748B', marginRight: 4 }}>
+                  Quick select:
+                </span>
+                {QUICK_INSTRUCTION_CHIPS.map((chip) => (
+                  <button
+                    type="button"
+                    key={chip}
+                    onClick={() => setFormState({ ...formState, instructions: chip })}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: 20,
+                      border: formState.instructions === chip ? '1.5px solid #13808D' : '1px solid #E2E8F0',
+                      background: formState.instructions === chip ? '#F0F9FA' : '#FFFFFF',
+                      color: formState.instructions === chip ? '#13808D' : '#334155',
+                      fontSize: 12.5,
+                      fontWeight: formState.instructions === chip ? 600 : 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+
+              {/* Row 5: Action Button & Status */}
               <div
                 style={{
                   display: 'flex',
-                  justifyContent: 'space-between',
                   alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: 12,
-                  paddingTop: 4,
+                  justifyContent: 'space-between',
+                  paddingTop: 14,
+                  borderTop: '1px solid #F1F5F9',
                 }}
               >
-                {/* Quick Chips */}
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  {QUICK_INSTRUCTION_CHIPS.map((chip) => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <button
+                    type="submit"
+                    style={{
+                      background: '#0E1E38',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '11px 24px',
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      boxShadow: '0 1px 3px rgba(14,30,56,0.2)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {editingId ? (
+                      <>
+                        <Check size={16} /> Update medication
+                      </>
+                    ) : (
+                      <>
+                        <Plus size={16} /> Add to list
+                      </>
+                    )}
+                  </button>
+
+                  {editingId && (
                     <button
                       type="button"
-                      key={chip}
-                      onClick={() => setFormState({ ...formState, instructions: chip })}
+                      onClick={handleCancelEdit}
                       style={{
-                        padding: '6px 14px',
-                        borderRadius: 20,
-                        border: formState.instructions === chip ? '1px solid #13808D' : '1px solid #E2E8F0',
-                        background: formState.instructions === chip ? '#F0F9FA' : '#FFFFFF',
-                        color: formState.instructions === chip ? '#13808D' : '#334155',
-                        fontSize: 12.5,
+                        background: '#FFFFFF',
+                        color: '#64748B',
+                        border: '1px solid #CBD5E1',
+                        borderRadius: 8,
+                        padding: '11px 18px',
+                        fontSize: 13.5,
                         fontWeight: 500,
                         cursor: 'pointer',
-                        transition: 'all 0.15s ease',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
                       }}
                     >
-                      {chip}
+                      <X size={14} /> Cancel editing
                     </button>
-                  ))}
+                  )}
                 </div>
 
-                {/* Action button */}
-                <button
-                  type="submit"
-                  style={{
-                    background: '#0E1E38',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    borderRadius: 8,
-                    padding: '11px 22px',
-                    fontSize: 13.5,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    boxShadow: '0 1px 3px rgba(14,30,56,0.2)',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  {editingId ? (
-                    <>
-                      <Check size={16} /> Update medication
-                    </>
-                  ) : (
-                    <>
-                      <Plus size={16} /> Add to list
-                    </>
-                  )}
-                </button>
+                <span style={{ fontSize: 12, color: '#94A3B8' }}>
+                  <span style={{ color: '#EF4444' }}>*</span> Required clinical fields
+                </span>
               </div>
             </form>
           </div>
@@ -928,12 +1150,12 @@ export function PrescriptionPanel({
         {/* VIEW 2: UPLOAD PRESCRIPTION */}
         {activeMode === 'upload' && (
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div
                   style={{
-                    width: 40,
-                    height: 40,
+                    width: 38,
+                    height: 38,
                     borderRadius: 10,
                     background: '#EFF6FF',
                     color: '#2563EB',
@@ -942,27 +1164,17 @@ export function PrescriptionPanel({
                     flexShrink: 0,
                   }}
                 >
-                  <UploadCloud size={20} />
+                  <UploadCloud size={19} />
                 </div>
                 <div>
-                  <strong style={{ fontSize: 16, color: '#0F172A', display: 'block', fontWeight: 700 }}>
+                  <strong style={{ fontSize: 15.5, color: '#0F172A', display: 'block', fontWeight: 700 }}>
                     Upload Prescription
                   </strong>
-                  <span style={{ fontSize: 13, color: '#64748B', display: 'block', marginTop: 2 }}>
+                  <span style={{ fontSize: 12.5, color: '#64748B', display: 'block', marginTop: 1 }}>
                     Upload photos, scans, or PDF documents of physical prescription sheets.
                   </span>
                 </div>
               </div>
-
-              <Button
-                variant="secondary"
-                size="small"
-                onClick={() => fileInputRef.current?.click()}
-                icon={<Plus size={14} />}
-                disabled={uploadingImage}
-              >
-                {uploadingImage ? 'Uploading…' : 'Choose files'}
-              </Button>
             </div>
 
             <input
@@ -974,6 +1186,15 @@ export function PrescriptionPanel({
               multiple
               onChange={(e) => handleImageFiles(e.target.files)}
             />
+            <input
+              ref={cameraInputRef}
+              className="sr-only"
+              id="prescription-camera-fallback"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => handleImageFiles(e.target.files)}
+            />
 
             <div
               className={`upload-drop${imageDragging ? ' dragging' : ''}`}
@@ -981,14 +1202,14 @@ export function PrescriptionPanel({
                 cursor: 'pointer',
                 border: imageDragging ? '2px dashed #13808D' : '1.5px dashed #CBD5E1',
                 background: imageDragging ? '#F0F9FA' : '#FAFCFC',
-                padding: '28px 20px',
+                padding: '12px 18px',
                 borderRadius: 12,
-                textAlign: 'center',
                 display: 'flex',
-                flexDirection: 'column',
                 alignItems: 'center',
-                gap: 8,
-                marginBottom: 16,
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 12,
+                marginBottom: 14,
                 transition: 'all 0.15s ease',
               }}
               onClick={() => fileInputRef.current?.click()}
@@ -1003,27 +1224,58 @@ export function PrescriptionPanel({
                 handleImageFiles(e.dataTransfer.files);
               }}
             >
-              <div
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: '50%',
-                  background: '#E2F1F0',
-                  color: '#13808D',
-                  display: 'grid',
-                  placeItems: 'center',
-                }}
-              >
-                <UploadCloud size={22} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: '50%',
+                    background: '#E2F1F0',
+                    color: '#13808D',
+                    display: 'grid',
+                    placeItems: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <UploadCloud size={18} />
+                </div>
+                <div>
+                  <strong style={{ fontSize: 13, color: '#0F172A', display: 'block' }}>
+                    {uploadingImage
+                      ? 'Reading prescription attachment…'
+                      : 'Choose prescription file (PDF or image) or drag & drop here'}
+                  </strong>
+                  <span style={{ fontSize: 11.5, color: '#64748B', display: 'block', marginTop: 1 }}>
+                    Supports JPG, PNG, WebP, SVG, AVIF, and PDF · Multiple files supported
+                  </span>
+                </div>
               </div>
-              <strong style={{ fontSize: 14, color: '#0F172A' }}>
-                {uploadingImage
-                  ? 'Reading prescription attachment…'
-                  : 'Choose prescription file (PDF or image) or drag & drop here'}
-              </strong>
-              <span style={{ fontSize: 12, color: '#64748B' }}>
-                Supports JPG, PNG, WebP, SVG, AVIF, and PDF documents · Multiple files supported
-              </span>
+
+              <div
+                style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Button
+                  variant="primary"
+                  size="small"
+                  onClick={() => setShowCamera(true)}
+                  icon={<Camera size={13} />}
+                  disabled={uploadingImage}
+                  style={{ background: '#13808D', borderColor: '#13808D', fontSize: 12, padding: '6px 13px' }}
+                >
+                  Capture with Camera
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => fileInputRef.current?.click()}
+                  icon={<Plus size={13} />}
+                  disabled={uploadingImage}
+                  style={{ fontSize: 12, padding: '6px 13px' }}
+                >
+                  Browse files
+                </Button>
+              </div>
             </div>
 
             {/* Uploaded Files Grid */}
@@ -1031,8 +1283,8 @@ export function PrescriptionPanel({
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-                  gap: 14,
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
+                  gap: 12,
                   marginTop: 14,
                 }}
               >
@@ -1047,24 +1299,26 @@ export function PrescriptionPanel({
                       key={img.id}
                       style={{
                         border: '1px solid #E2E8F0',
-                        borderRadius: 12,
+                        borderRadius: 10,
                         overflow: 'hidden',
                         background: '#FFFFFF',
                         display: 'flex',
                         flexDirection: 'column',
                         boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                        position: 'relative',
                       }}
                     >
                       <div
                         style={{
-                          height: 125,
-                          background: '#F1F5F9',
+                          height: 95,
+                          background: '#F8FAFC',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           cursor: 'pointer',
                           overflow: 'hidden',
                           position: 'relative',
+                          borderBottom: '1px solid #F1F5F9',
                         }}
                         onClick={() => setPreviewImage(img)}
                         title="Click to preview"
@@ -1076,22 +1330,49 @@ export function PrescriptionPanel({
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           />
                         ) : isPdf ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: '#DC2626' }}>
-                            <FileText size={38} />
-                            <span style={{ fontSize: 11, fontWeight: 700, color: '#0F172A' }}>PDF Document</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, color: '#DC2626' }}>
+                            <FileText size={28} />
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: '#0F172A' }}>PDF Document</span>
                           </div>
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: '#13808D' }}>
-                            <FileText size={38} />
-                            <span style={{ fontSize: 11, fontWeight: 600 }}>File</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, color: '#13808D' }}>
+                            <FileText size={28} />
+                            <span style={{ fontSize: 10.5, fontWeight: 600 }}>File</span>
                           </div>
                         )}
+
+                        {/* Quick Delete hover button */}
+                        <div style={{ position: 'absolute', top: 5, right: 5 }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeImage(img.id, img.name);
+                            }}
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: '50%',
+                              background: 'rgba(255, 255, 255, 0.95)',
+                              border: '1px solid rgba(226, 232, 240, 0.9)',
+                              display: 'grid',
+                              placeItems: 'center',
+                              color: '#DC2626',
+                              cursor: 'pointer',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                            }}
+                            title="Delete file"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
                       </div>
-                      <div style={{ padding: '10px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+
+                      <div style={{ padding: '9px 10px', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                           <strong
                             style={{
-                              fontSize: 12.5,
+                              fontSize: 12,
                               fontWeight: 700,
                               color: '#0F172A',
                               overflow: 'hidden',
@@ -1107,18 +1388,22 @@ export function PrescriptionPanel({
                             {isPdf ? 'PDF' : isImg ? 'Image' : 'Doc'}
                           </Badge>
                         </div>
+
                         <span style={{ fontSize: 11, color: '#64748B' }}>
                           {(img.size / 1024).toFixed(0)} KB · {dateLabel(img.uploadedAt, 'd MMM · h:mm a')}
                         </span>
+
+                        {/* Perfectly Aligned Button Row */}
                         <div
                           style={{
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            gap: 6,
+                            gap: 8,
                             marginTop: 'auto',
-                            paddingTop: 8,
+                            paddingTop: 10,
                             borderTop: '1px solid #F1F5F9',
+                            flexWrap: 'wrap',
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1126,39 +1411,38 @@ export function PrescriptionPanel({
                               variant="secondary"
                               size="small"
                               onClick={() => setPreviewImage(img)}
-                              icon={<Eye size={12} />}
-                              style={{ padding: '3px 8px', fontSize: 11, height: 26 }}
+                              icon={<Eye size={13} />}
+                              style={{ padding: '4px 10px', fontSize: 11.5, height: 28 }}
                             >
                               Preview
                             </Button>
-                            <a
-                              href={resolveDocumentUrl(img)}
-                              download={img.name}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="btn btn-secondary btn-small"
-                              style={{
-                                padding: '3px 8px',
-                                fontSize: 11,
-                                height: 26,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4,
-                                textDecoration: 'none',
-                              }}
-                              title="Download file"
+                            <Button
+                              variant="secondary"
+                              size="small"
+                              onClick={() => handleDownload(img)}
+                              icon={<Download size={13} />}
+                              style={{ padding: '4px 10px', fontSize: 11.5, height: 28 }}
+                              title="Download file directly"
                             >
-                              <Download size={12} />
                               Download
-                            </a>
+                            </Button>
                           </div>
+
                           <Button
                             variant="ghost"
                             size="small"
                             onClick={() => removeImage(img.id, img.name)}
-                            icon={<Trash2 size={12} />}
-                            style={{ padding: '3px 8px', fontSize: 11, height: 26, color: '#DC2626' }}
-                            title="Delete file"
+                            icon={<Trash2 size={13} />}
+                            style={{
+                              padding: '4px 10px',
+                              fontSize: 11.5,
+                              height: 28,
+                              color: '#DC2626',
+                              background: '#FEF2F2',
+                              border: '1px solid #FECACA',
+                              borderRadius: 6,
+                            }}
+                            title="Delete prescription file"
                           >
                             Delete
                           </Button>
@@ -1610,16 +1894,85 @@ export function PrescriptionPanel({
           return (
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
               {isPdf ? (
-                <iframe
-                  className="prescription-preview-pdf"
-                  src={resolveDocumentUrl(previewImage)}
-                  title={`Preview of ${previewImage.name}`}
-                />
+                pdfLoading ? (
+                  <div
+                    style={{
+                      width: 'min(900px, 90vw)',
+                      height: '60vh',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: '#F8FAFC',
+                      borderRadius: 8,
+                      border: '1px solid #E2E8F0',
+                      gap: 12,
+                    }}
+                  >
+                    <RefreshCw size={28} style={{ color: '#13808D', animation: 'spinner 1s linear infinite' }} />
+                    <span style={{ fontSize: 13.5, color: '#475569', fontWeight: 500 }}>
+                      Loading PDF preview…
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    {pdfLoadError && (
+                      <div
+                        style={{
+                          width: 'min(900px, 90vw)',
+                          padding: '10px 14px',
+                          background: '#FEF2F2',
+                          border: '1px solid #FECACA',
+                          borderRadius: 8,
+                          color: '#991B1B',
+                          fontSize: 12.5,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                      >
+                        <AlertCircle size={16} style={{ flexShrink: 0, color: '#DC2626' }} />
+                        <span>Could not prepare inline preview directly ({pdfLoadError}). Falling back to direct URL.</span>
+                      </div>
+                    )}
+                    <object
+                      data={pdfPreviewBlobUrl || resolveInlineDocumentUrl(previewImage)}
+                      type="application/pdf"
+                      className="prescription-preview-pdf"
+                      style={{
+                        width: 'min(900px, 90vw)',
+                        height: '75vh',
+                        borderRadius: 8,
+                        border: '1px solid #CBD5E1',
+                        background: '#FFFFFF',
+                      }}
+                    >
+                      <iframe
+                        src={pdfPreviewBlobUrl || resolveInlineDocumentUrl(previewImage)}
+                        className="prescription-preview-pdf"
+                        title={`Preview of ${previewImage.name}`}
+                        style={{ width: '100%', height: '100%', border: 'none', background: '#FFFFFF' }}
+                      >
+                        <div style={{ padding: 32, textAlign: 'center', background: '#F8FAFC', borderRadius: 8 }}>
+                          <FileText size={42} color="#DC2626" style={{ marginBottom: 10 }} />
+                          <strong style={{ display: 'block', fontSize: 14 }}>Inline PDF Viewer Not Available</strong>
+                          <p style={{ fontSize: 12.5, color: '#64748B', marginTop: 4, marginBottom: 14 }}>
+                            Your browser does not support embedding this PDF inline. You can open or download the PDF file directly.
+                          </p>
+                          <Button variant="primary" onClick={() => handleDownload(previewImage)} icon={<Download size={14} />}>
+                            Download PDF
+                          </Button>
+                        </div>
+                      </iframe>
+                    </object>
+                  </>
+                )
               ) : isImg ? (
                 <img
                   className="prescription-preview-img"
                   src={resolveDocumentUrl(previewImage)}
                   alt={previewImage.name}
+                  style={{ maxHeight: '75vh', maxWidth: '100%', objectFit: 'contain', borderRadius: 8 }}
                 />
               ) : (
                 <div style={{ padding: '36px 24px', textAlign: 'center', background: '#fff', borderRadius: 8, border: '1px solid var(--line)' }}>
@@ -1628,20 +1981,250 @@ export function PrescriptionPanel({
                   <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>This document can be downloaded and opened with your local application.</p>
                 </div>
               )}
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, width: '100%', marginTop: 4 }}>
-                <a
-                  href={resolveDocumentUrl(previewImage)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download={previewImage.name}
-                  className="btn btn-secondary"
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: 10, width: '100%', marginTop: 8 }}>
+                {isPdf && (pdfPreviewBlobUrl || resolveInlineDocumentUrl(previewImage)) && (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      const target = pdfPreviewBlobUrl || resolveInlineDocumentUrl(previewImage);
+                      window.open(target, '_blank', 'noopener,noreferrer');
+                    }}
+                    icon={<ExternalLink size={14} />}
+                    style={{ background: '#13808D', borderColor: '#13808D' }}
+                  >
+                    Open in New Tab
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  onClick={() => handleDownload(previewImage)}
+                  icon={<Download size={15} />}
                 >
-                  <Download size={14} /> Download Original File
-                </a>
+                  Download Original File
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    removeImage(previewImage.id, previewImage.name);
+                    setPreviewImage(null);
+                  }}
+                  icon={<Trash2 size={15} />}
+                  style={{ color: '#DC2626' }}
+                >
+                  Delete File
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setPreviewImage(null)}
+                >
+                  Close
+                </Button>
               </div>
             </div>
           );
         })()}
+      </Modal>
+
+      {/* CAMERA CAPTURE MODAL */}
+      <Modal
+        open={showCamera}
+        onClose={closeCameraModal}
+        title="Capture Prescription with Camera"
+        subtitle="Align physical prescription sheet within the viewfinder and capture a clear photo."
+        className="modal-fit-media"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          {cameraError ? (
+            <div
+              style={{
+                padding: '24px 20px',
+                background: '#FEF2F2',
+                border: '1px solid #FECACA',
+                borderRadius: 12,
+                color: '#991B1B',
+                textAlign: 'center',
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <AlertCircle size={32} />
+              <div>
+                <strong style={{ fontSize: 15, display: 'block' }}>Camera Access Error</strong>
+                <p style={{ fontSize: 13, marginTop: 4, color: '#B91C1C' }}>{cameraError}</p>
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                <Button
+                  variant="primary"
+                  size="small"
+                  onClick={() => cameraInputRef.current?.click()}
+                  icon={<Camera size={14} />}
+                >
+                  Open Device Camera via File App
+                </Button>
+                <Button variant="secondary" size="small" onClick={closeCameraModal}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Viewfinder / Captured Preview Box */}
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  maxWidth: 640,
+                  aspectRatio: '4/3',
+                  background: '#0F172A',
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
+                }}
+              >
+                {!capturedPhotoUrl ? (
+                  <>
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                      }}
+                    />
+                    {/* Viewfinder framing guide */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        inset: 20,
+                        border: '2px dashed rgba(255, 255, 255, 0.65)',
+                        borderRadius: 8,
+                        pointerEvents: 'none',
+                        boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.25)',
+                        display: 'flex',
+                        alignItems: 'flex-end',
+                        justifyContent: 'center',
+                        paddingBottom: 10,
+                      }}
+                    >
+                      <span
+                        style={{
+                          background: 'rgba(15, 23, 42, 0.75)',
+                          color: '#FFFFFF',
+                          fontSize: 12,
+                          padding: '4px 10px',
+                          borderRadius: 20,
+                          backdropFilter: 'blur(4px)',
+                        }}
+                      >
+                        Position prescription within frame
+                      </span>
+                    </div>
+
+                    {/* Switch camera button */}
+                    <button
+                      type="button"
+                      onClick={() => setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))}
+                      style={{
+                        position: 'absolute',
+                        top: 12,
+                        right: 12,
+                        background: 'rgba(15, 23, 42, 0.7)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        color: '#FFFFFF',
+                        borderRadius: '50%',
+                        width: 36,
+                        height: 36,
+                        display: 'grid',
+                        placeItems: 'center',
+                        cursor: 'pointer',
+                      }}
+                      title="Switch Camera (Front / Back)"
+                    >
+                      <RefreshCw size={16} />
+                    </button>
+                  </>
+                ) : (
+                  <img
+                    src={capturedPhotoUrl}
+                    alt="Captured Prescription"
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                      background: '#1E293B',
+                    }}
+                  />
+                )}
+                {/* Hidden canvas used for frame capture */}
+                <canvas ref={canvasRef} style={{ display: 'none' }} />
+              </div>
+
+              {/* Action Controls */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, width: '100%' }}>
+                {!capturedPhotoUrl ? (
+                  <>
+                    <Button
+                      variant="primary"
+                      onClick={capturePhoto}
+                      icon={<Camera size={18} />}
+                      style={{
+                        padding: '10px 24px',
+                        fontSize: 14,
+                        fontWeight: 600,
+                        background: '#13808D',
+                        borderColor: '#13808D',
+                      }}
+                    >
+                      Capture Photo
+                    </Button>
+                    <Button variant="secondary" onClick={closeCameraModal}>
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="secondary"
+                      onClick={retakePhoto}
+                      icon={<RotateCcw size={15} />}
+                      style={{ padding: '8px 18px', fontSize: 13 }}
+                    >
+                      Retake
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={uploadCapturedPhoto}
+                      icon={<Check size={16} />}
+                      style={{
+                        padding: '8px 22px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        background: '#16A34A',
+                        borderColor: '#16A34A',
+                      }}
+                    >
+                      Use Photo & Upload
+                    </Button>
+                    <Button variant="ghost" onClick={closeCameraModal}>
+                      Cancel
+                    </Button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </Modal>
 
       {/* Datalists for Autocomplete */}

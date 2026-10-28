@@ -401,7 +401,7 @@ export function DoctorTreatmentsPage({ department }: { department: Department })
                           <Button
                             variant="ghost"
                             size="small"
-                            onClick={() => navigate(`/${rolePath(department)}/consultation/${visit.patientId}`)}
+                            onClick={() => navigate(`/${rolePath(department)}/consultation/${visit.patientId}?visitId=${visit.id}`)}
                           >
                             Open visit
                           </Button>
@@ -620,7 +620,7 @@ export function DoctorHistoryPage({ department }: { department: Department }) {
                           <Button
                             variant="secondary"
                             size="small"
-                            onClick={() => navigate(`/${rolePath(department)}/consultation/${visit.patientId}`)}
+                            onClick={() => navigate(`/${rolePath(department)}/consultation/${visit.patientId}?visitId=${visit.id}`)}
                             icon={<Stethoscope size={13} />}
                           >
                             Open consultation

@@ -146,6 +146,12 @@ class LocalStorageService(StorageService):
     async def get_object(self, key: str) -> tuple[bytes, str]:
         target_path = self.base_dir / key
         if not target_path.exists():
+            for ext in (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".txt", ".doc", ".docx"):
+                alt = self.base_dir / f"{key}{ext}"
+                if alt.exists():
+                    target_path = alt
+                    break
+        if not target_path.exists():
             raise FileNotFoundError(f"File {key} not found.")
         data = target_path.read_bytes()
         # Guess mime type from extension
@@ -183,9 +189,27 @@ class LocalStorageService(StorageService):
     def verify_signed_url(self, key: str, expires: int, signature: str) -> bool:
         if time.time() > expires:
             return False
+        # Direct check
         payload = f"{key}:{expires}".encode()
         expected = hmac.new(settings.JWT_SECRET_KEY.encode(), payload, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(signature, expected)
+        if hmac.compare_digest(signature, expected):
+            return True
+
+        # Check with candidate extensions (when URL extension was stripped to avoid IDM hijack)
+        for ext in (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
+            alt_key = f"{key}{ext}"
+            alt_payload = f"{alt_key}:{expires}".encode()
+            alt_expected = hmac.new(settings.JWT_SECRET_KEY.encode(), alt_payload, hashlib.sha256).hexdigest()
+            if hmac.compare_digest(signature, alt_expected):
+                return True
+            # Also check if key had extension but signature was computed without extension
+            if key.endswith(ext):
+                base_key = key[:-len(ext)]
+                base_payload = f"{base_key}:{expires}".encode()
+                base_expected = hmac.new(settings.JWT_SECRET_KEY.encode(), base_payload, hashlib.sha256).hexdigest()
+                if hmac.compare_digest(signature, base_expected):
+                    return True
+        return False
 
 
 class S3StorageService(StorageService):

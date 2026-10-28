@@ -1,5 +1,6 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/layout/AppShell';
+import LandingPage from '../features/landing/LandingPage';
 import { LoginPage } from '../features/auth/LoginPage';
 import { ReceptionDashboard } from '../features/reception/ReceptionDashboard';
 import { QueuePage } from '../features/reception/QueuePage';
@@ -19,9 +20,13 @@ import { DoctorChargesPage } from '../features/doctors/DoctorChargesPage';
 import { DoctorReportsPage } from '../features/doctors/DoctorReportsPage';
 
 export function App() {
+  const navigate = useNavigate();
+
   return (
     <Routes>
-      <Route path="/" element={<LoginPage />} />
+      <Route path="/" element={<LandingPage onLogin={() => navigate('/login')} />} />
+      <Route path="/landing" element={<LandingPage onLogin={() => navigate('/login')} />} />
+      <Route path="/login" element={<LoginPage />} />
       <Route path="/reception" element={<AppShell />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<ReceptionDashboard />} />

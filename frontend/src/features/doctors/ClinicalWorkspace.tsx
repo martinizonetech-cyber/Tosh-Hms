@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { Check, CheckCheck, ClipboardList, Edit2, FileText, Printer, Save, Stethoscope } from 'lucide-react';
-import { useNavigate, useParams } from 'react-router-dom';
-import type { Consultation, Department } from '../../types/domain';
+import { Check, CheckCheck, ClipboardList, Edit2, FileText, PlusCircle, Printer, RotateCcw, Save, Stethoscope } from 'lucide-react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import type { Consultation, Department, PrescriptionItem } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';
 import { useToast } from '../../components/ui/Toast';
 import { dateLabel, departmentLabel, getAge, resolveDocumentUrl } from '../../utils/format';
@@ -24,11 +24,14 @@ type Tab = typeof tabs[number];
 const tabOptions = tabs.map((label) => ({ id: label, label }));
 const doctorNames: Record<Department, string> = { skin: 'Dr. Sangamitra', orthopaedics: 'Dr. Sundarprakash' };
 function blankVisit(patientId: string, department: Department, visitId?: string): Consultation {
-  return { id: visitId ?? `DRAFT-${patientId}-${department}`, patientId, department, visitedAt: new Date().toISOString(), vitals: { bloodPressure: '', pulse: '', temperature: '', height: '', weight: '', oxygenSaturation: '' }, symptoms: '', medicalHistory: '', allergies: '', examination: '', assessment: '', diagnosis: '', treatmentPlan: '', prescription: [], prescriptionImages: [], documents: [], procedures: [], painLocation: '', side: 'Not applicable', status: 'Draft' };
+  return { id: visitId ?? `DRAFT-${patientId}-${department}-${Date.now().toString(36)}`, patientId, department, visitedAt: new Date().toISOString(), vitals: { bloodPressure: '', pulse: '', temperature: '', height: '', weight: '', oxygenSaturation: '' }, symptoms: '', medicalHistory: '', allergies: '', examination: '', assessment: '', diagnosis: '', treatmentPlan: '', prescription: [], prescriptionImages: [], documents: [], procedures: [], painLocation: '', side: 'Not applicable', status: 'Draft' };
 }
 
 export function ClinicalWorkspace({ department }: { department: Department }) {
   const { patientId: routePatientId } = useParams<{ patientId: string }>();
+  const [searchParams] = useSearchParams();
+  const explicitVisitId = searchParams.get('visitId');
+
   const { state, repository } = useHospitalData();
   const toast = useToast();
   const navigate = useNavigate();
@@ -37,31 +40,79 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
   const defaultPatient = state.queue.find((entry) => entry.department === department && entry.status !== 'Completed')?.patientId ?? patients[0]?.id;
   const selectedPatientId = routePatientId ?? defaultPatient;
   const patient = state.patients.find((entry) => entry.id === selectedPatientId);
-  const selectedQueue = state.queue.find((entry) => entry.patientId === selectedPatientId && entry.department === department && entry.status !== 'Completed') ?? state.queue.find((entry) => entry.patientId === selectedPatientId && entry.department === department);
-  const visitIdSupplied = selectedQueue?.visitId !== undefined;
-  const queueVisitId = selectedQueue?.visitId;
-  const invalidEmptyVisitId = visitIdSupplied && !queueVisitId?.trim();
-  const visitCandidate = visitIdSupplied && !invalidEmptyVisitId ? state.consultations.find((visit) => visit.id === queueVisitId) : undefined;
-  const visitLinkMismatch = Boolean(invalidEmptyVisitId || (visitCandidate && (visitCandidate.patientId !== selectedPatientId || visitCandidate.department !== department)));
-  const savedVisit = visitIdSupplied ? (!visitLinkMismatch ? visitCandidate : undefined) : state.consultations.find((visit) => visit.patientId === selectedPatientId && visit.department === department);
-  const missingVisitId = visitIdSupplied && !visitLinkMismatch && !visitCandidate ? queueVisitId : undefined;
-  const [clinical, setClinical] = useState<Consultation>(() => patient ? savedVisit ?? blankVisit(patient.id, department, missingVisitId) : blankVisit('', department));
+
+  // Active uncompleted queue entry (Waiting / Consulting)
+  const activeQueue = state.queue.find(
+    (entry) => entry.patientId === selectedPatientId && entry.department === department && entry.status !== 'Completed'
+  );
+
+  // If doctor specifically clicked "Open visit" with a visitId in query string
+  const explicitVisit = explicitVisitId
+    ? state.consultations.find((v) => v.id === explicitVisitId && v.patientId === selectedPatientId)
+    : undefined;
+
+  // In-progress draft for this patient in this department (if any)
+  const existingDraft = activeQueue?.visitId
+    ? state.consultations.find((v) => v.id === activeQueue.visitId && v.status === 'Draft')
+    : state.consultations.find((c) => c.patientId === selectedPatientId && c.department === department && c.status === 'Draft');
+
+  // Visit link integrity check
+  const visitLinkMismatch = Boolean(explicitVisitId && !explicitVisit && state.consultations.some((v) => v.id === explicitVisitId && v.patientId !== selectedPatientId));
+
+  // Resolved active consultation:
+  // - If explicit historical visit requested: open it
+  // - If active queue entry exists:
+  //     - if draft already in state, use it
+  //     - otherwise, create clean new visit with queue visitId and reception-entered vitals
+  // - If an active draft already exists: continue that draft
+  // - If returning patient with finalized visits: DO NOT prefill old details! Start clean!
+  const savedVisit = useMemo(() => {
+    if (!patient) return undefined;
+    if (explicitVisit) return explicitVisit;
+    if (activeQueue) {
+      if (existingDraft) return existingDraft;
+      const fresh = blankVisit(patient.id, department, activeQueue.visitId);
+      if (activeQueue.vitals) {
+        fresh.vitals = {
+          bloodPressure: activeQueue.vitals.bloodPressure || '',
+          pulse: activeQueue.vitals.pulse || '',
+          temperature: activeQueue.vitals.temperature || '',
+          height: activeQueue.vitals.height || '',
+          weight: activeQueue.vitals.weight || '',
+          oxygenSaturation: activeQueue.vitals.oxygenSaturation || '',
+        };
+      }
+      return fresh;
+    }
+    if (existingDraft) return existingDraft;
+    // Returning patient with past finalized visits or new patient: start fresh!
+    return blankVisit(patient.id, department);
+  }, [patient?.id, explicitVisit?.id, activeQueue?.id, activeQueue?.visitId, existingDraft?.id, department]);
+
+  const [clinical, setClinical] = useState<Consultation>(() => savedVisit ?? (patient ? blankVisit(patient.id, department) : blankVisit('', department)));
   const [tab, setTab] = useState<Tab>('Clinical notes');
   const [editingVitals, setEditingVitals] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [conflictError, setConflictError] = useState(false);
   const [isLocked, setIsLocked] = useState(clinical.status === 'Finalized');
 
+  // All previous finalized visits for this patient
+  const previousVisits = useMemo(() => {
+    if (!patient) return [];
+    return state.consultations
+      .filter((v) => v.patientId === patient.id && v.id !== clinical.id && v.status === 'Finalized')
+      .sort((a, b) => b.visitedAt.localeCompare(a.visitedAt));
+  }, [state.consultations, patient?.id, clinical.id]);
+
   useEffect(() => {
-    if (patient) {
-      const initial = savedVisit ?? blankVisit(patient.id, department, missingVisitId);
-      setClinical(initial);
-      setIsLocked(initial.status === 'Finalized');
+    if (patient && savedVisit) {
+      setClinical(savedVisit);
+      setIsLocked(savedVisit.status === 'Finalized');
       setDirty(false);
       setConflictError(false);
       setTab('Clinical notes');
 
-      const targetVisitId = queueVisitId || initial.id;
+      const targetVisitId = savedVisit.id;
       if (targetVisitId && !targetVisitId.startsWith('DRAFT-') && repository.getConsultation) {
         repository
           .getConsultation(targetVisitId)
@@ -76,7 +127,7 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
           });
       }
     }
-  }, [selectedPatientId, selectedQueue?.id, selectedQueue?.visitId, savedVisit?.id, missingVisitId]);
+  }, [selectedPatientId, savedVisit?.id, explicitVisitId]);
 
   if (visitLinkMismatch) return <><PageHeading eyebrow={`${departmentLabel(department)} · Visit integrity`} title="Visit link needs review" description="No consultation from another patient or department was opened." /><Card><EmptyState title="Visit ID does not match this patient" message="The queue entry has an invalid visit ID or points to a consultation assigned to a different patient or department." icon={<ClipboardList size={18} />} /></Card></>;
   if (!patient || !selectedPatientId) return <><PageHeading eyebrow={`${departmentLabel(department)} · Consultation`} title="Consultation workspace" description="Select a patient to begin a clinical record." /><Card><EmptyState title="No department patients yet" message="Register or schedule a patient from Reception to start a consultation." icon={<Stethoscope size={18} />} action={<Button onClick={() => navigate('/reception/patients')}>Open patient directory</Button>} /></Card></>;
@@ -154,6 +205,18 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
     }
   };
 
+  const handleCopyPrescription = (items: PrescriptionItem[]) => {
+    if (!items || items.length === 0) return;
+    const newItems: PrescriptionItem[] = items.map((item, idx) => ({
+      ...item,
+      id: `RX-${Date.now()}-${idx + 1}`,
+    }));
+    patch({
+      prescription: [...(clinical.prescription || []), ...newItems],
+    });
+    toast.push(`Copied ${newItems.length} medication(s) to current prescription. View in Prescription tab.`, 'success');
+  };
+
   const changePatient = (id: string) => {
     if (!id) return;
     if (dirty && !window.confirm('Discard unsaved consultation changes and open another patient?')) return;
@@ -169,7 +232,37 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
     <PageHeading eyebrow={`${departmentLabel(department)} · Clinical workspace`} title="Consultation" description="Document what the clinician observes and decides; every clinical statement and prescription stays doctor-entered." actions={<><Button variant="secondary" size="small" onClick={() => print('clinical')} icon={<Printer size={14} />}>Print summary</Button><Button variant="secondary" size="small" onClick={() => save('Draft')} disabled={isLocked} icon={<Save size={14} />}>Save draft</Button><Button size="small" onClick={() => { if (window.confirm('Finalize this consultation?')) save('Finalized'); }} disabled={isLocked} icon={<CheckCheck size={14} />}>Finalize</Button></>} />
     <div className="doctor-workspace">
       <aside className="stack sticky-card">
-        <Card><SectionHeading title="Patient overview" action={<span className="clinical-summary-tag"><FileText size={14} /><Badge tone={clinical.status === 'Finalized' ? 'success' : 'warn'}>{clinical.status}</Badge></span>} /><div className="clinical-patient-name"><PatientAvatar name={patient.fullName} /><div><strong>{patient.fullName}</strong><span>{patient.id}</span></div></div><div className="profile-grid compact-profile"><div className="profile-info"><span>Age / gender</span><strong>{getAge(patient.dateOfBirth) ?? '—'} years · {patient.gender}</strong></div><div className="profile-info"><span>Phone</span><strong>{patient.phone}</strong></div><div className="profile-info"><span>Department</span><strong>{departmentLabel(department)}</strong></div><div className="profile-info"><span>Latest visit</span><strong>{patient.latestVisitAt ? formatDistanceToNow(new Date(patient.latestVisitAt), { addSuffix: true }) : 'First visit'}</strong></div></div><div className="field" style={{ marginTop: 13 }}><label htmlFor="consult-patient">Switch patient</label><select id="consult-patient" className="control" value={patient.id} onChange={(event) => changePatient(event.target.value)}>{patients.map((entry) => <option key={entry.id} value={entry.id}>{entry.fullName} · {entry.id}</option>)}</select></div></Card>
+        <Card>
+          <SectionHeading title="Patient overview" action={<span className="clinical-summary-tag"><FileText size={14} /><Badge tone={clinical.status === 'Finalized' ? 'success' : 'warn'}>{clinical.status}</Badge></span>} />
+          <div className="clinical-patient-name"><PatientAvatar name={patient.fullName} /><div><strong>{patient.fullName}</strong><span>{patient.id}</span></div></div>
+          <div className="profile-grid compact-profile">
+            <div className="profile-info"><span>Age / gender</span><strong>{getAge(patient.dateOfBirth) ?? '—'} years · {patient.gender}</strong></div>
+            <div className="profile-info"><span>Phone</span><strong>{patient.phone}</strong></div>
+            <div className="profile-info"><span>Department</span><strong>{departmentLabel(department)}</strong></div>
+            <div className="profile-info"><span>Latest visit</span><strong>{patient.latestVisitAt ? formatDistanceToNow(new Date(patient.latestVisitAt), { addSuffix: true }) : 'First visit'}</strong></div>
+          </div>
+
+          {previousVisits.length > 0 && (
+            <div style={{ marginTop: 10, padding: '7px 10px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 6, fontSize: '11px', color: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span><strong>Returning patient:</strong> {previousVisits.length} previous visit{previousVisits.length === 1 ? '' : 's'} on record</span>
+            </div>
+          )}
+
+          {explicitVisitId && (
+            <div style={{ marginTop: 8, padding: '7px 10px', background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: 6, fontSize: '11px', color: '#92400E', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Viewing historical record ({explicitVisitId})</span>
+              <button
+                type="button"
+                onClick={() => navigate(`/${role}/consultation/${patient.id}`)}
+                style={{ background: 'none', border: 'none', color: '#B45309', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+              >
+                Start new visit
+              </button>
+            </div>
+          )}
+
+          <div className="field" style={{ marginTop: 13 }}><label htmlFor="consult-patient">Switch patient</label><select id="consult-patient" className="control" value={patient.id} onChange={(event) => changePatient(event.target.value)}>{patients.map((entry) => <option key={entry.id} value={entry.id}>{entry.fullName} · {entry.id}</option>)}</select></div>
+        </Card>
         <Card>
           <SectionHeading
             title="Reception-entered vitals"
@@ -296,9 +389,17 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
         )}
         {dirty && !isLocked && !conflictError && <div className="status-strip" role="status"><ClipboardList size={14} /> You have unsaved changes. Save draft to keep them in the record.</div>}
         <TabPanel idPrefix="clinical" selected={tab} className="clinical-tab-content">
-          {tab === 'Clinical notes' && <ClinicalNotesPanel department={department} consultation={clinical} onChange={patch} />}
+          {tab === 'Clinical notes' && (
+            <ClinicalNotesPanel
+              department={department}
+              consultation={clinical}
+              onChange={patch}
+              previousVisits={previousVisits}
+              onCopyPrescription={handleCopyPrescription}
+            />
+          )}
           {tab === 'Prescription' && <PrescriptionPanel consultation={clinical} onChange={patch} onPrint={() => print('prescription')} department={department} />}
-          {tab === 'Documents' && <DocumentsPanel patientId={patient.id} department={department} documents={clinical.documents} onChange={(documents) => patch({ documents })} />}
+          {tab === 'Documents' && <DocumentsPanel patientId={patient.id} department={department} documents={clinical.documents} onChange={(documents) => patch({ documents })} visitId={clinical.id} />}
           {tab === 'Procedures' && <ProceduresPanel patientId={patient.id} department={department} consultation={clinical} onChange={patch} />}
           {tab === 'Follow-up' && <DoctorFollowUpPanel patientId={patient.id} department={department} doctor={doctorNames[department]} consultation={clinical} onChange={patch} />}
         </TabPanel>

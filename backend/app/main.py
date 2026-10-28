@@ -72,9 +72,14 @@ def _attach_cors_headers(request: Request, response: Response) -> Response:
         if req_headers:
             response.headers["Access-Control-Allow-Headers"] = req_headers
         elif "Access-Control-Allow-Headers" not in response.headers:
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, X-Request-ID"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, X-Request-ID, X-Requested-With"
         if "Access-Control-Allow-Methods" not in response.headers:
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
+    else:
+        # Crucial for iframe/embed/object subresource requests where Origin header is omitted by browser
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, X-Request-ID, X-Requested-With"
     return response
 
 
@@ -112,7 +117,12 @@ async def security_and_request_id_middleware(request: Request, call_next):
     # Security headers
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    if "/documents/" in request.url.path or request.url.path.startswith("/api/v1/documents"):
+        allowed_origins = " ".join(settings.CORS_ORIGINS) if settings.CORS_ORIGINS else "'self'"
+        response.headers["Content-Security-Policy"] = f"frame-ancestors 'self' http://localhost:3000 http://localhost:5173 http://127.0.0.1:3000 http://127.0.0.1:5173 {allowed_origins}"
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    else:
+        response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 

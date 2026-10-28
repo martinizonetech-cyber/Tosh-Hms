@@ -261,10 +261,10 @@ async def delete_document(
 ) -> dict:
     doc = await find_document_by_id(db, document_id)
     if not doc:
-        raise NotFoundException(f"Document with ID {document_id} not found.")
+        return {"message": "Document deleted successfully."}
 
-    # Department guard
-    if current_user.role in ("skin", "orthopaedics"):
+    # Department guard (uploader can always delete their own document)
+    if current_user.role in ("skin", "orthopaedics") and doc.uploaded_by != current_user.id:
         vis_stmt = select(Visit.department).where(Visit.patient_id == doc.patient_id).distinct()
         vis_res = await db.execute(vis_stmt)
         depts = list(vis_res.scalars().all())
@@ -342,11 +342,14 @@ async def rename_document(
     return to_document_response(doc, signed_url)
 
 
+@router.get("/documents/files/{key}/view", summary="Inline view document file via signed URL")
+@router.get("/documents/view/{key}", summary="Inline view document file via signed URL")
 @router.get("/documents/files/{key}", summary="Download document file via signed URL")
 async def get_document_file(
     key: str,
     expires: int = Query(...),
     sig: str = Query(...),
+    download: bool = Query(default=False),
 ) -> Response:
     storage = get_storage_service()
     if isinstance(storage, LocalStorageService):
@@ -356,11 +359,29 @@ async def get_document_file(
             data, content_type = await storage.get_object(key)
         except FileNotFoundError:
             raise NotFoundException(f"Document file {key} not found on server.")
-        return Response(content=data, media_type=content_type)
     else:
         # S3 pre-signed URLs are handled by S3 directly
         try:
             data, content_type = await storage.get_object(key)
         except Exception:
             raise NotFoundException(f"Document file {key} not found on server.")
-        return Response(content=data, media_type=content_type)
+
+    filename = Path(key).name
+    if not filename.endswith((".pdf", ".png", ".jpg", ".jpeg", ".webp")) and content_type == "application/pdf":
+        filename = f"{filename}.pdf"
+
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Request-ID, X-Requested-With, Range",
+        "Access-Control-Expose-Headers": "Content-Disposition, Content-Length, Content-Type, Accept-Ranges",
+        "Cross-Origin-Resource-Policy": "cross-origin",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(len(data)),
+    }
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    else:
+        headers["Content-Disposition"] = f'inline; filename="{filename}"'
+
+    return Response(content=data, media_type=content_type, headers=headers)

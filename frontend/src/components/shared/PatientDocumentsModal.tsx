@@ -1,9 +1,10 @@
-import { useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import {
   Download,
   Eye,
   FileText,
   Image as ImageIcon,
+  Loader2,
   Trash2,
   UploadCloud,
   ExternalLink,
@@ -13,7 +14,7 @@ import {
 import type { Department, Patient, PatientDocument, QueueEntry } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';
 import { useToast } from '../../components/ui/Toast';
-import { dateLabel, departmentLabel, resolveDocumentUrl } from '../../utils/format';
+import { dateLabel, departmentLabel, downloadFile, fetchPdfBlobUrl, resolveDocumentUrl, resolveInlineDocumentUrl } from '../../utils/format';
 import { PatientAvatar } from './Primitives';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -56,7 +57,63 @@ export function PatientDocumentsModal({
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PatientDocument | null>(null);
+  const [pdfPreviewBlobUrl, setPdfPreviewBlobUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [viewFilter, setViewFilter] = useState<'all' | 'prescription' | 'other'>('all');
+
+  useEffect(() => {
+    let active = true;
+    let createdUrl: string | null = null;
+
+    if (!preview) {
+      setPdfPreviewBlobUrl(null);
+      setPdfLoading(false);
+      setPdfError(null);
+      return;
+    }
+
+    const isPdf =
+      preview.mimeType === 'application/pdf' ||
+      preview.name.toLowerCase().endsWith('.pdf');
+
+    if (!isPdf) {
+      setPdfPreviewBlobUrl(null);
+      setPdfLoading(false);
+      setPdfError(null);
+      return;
+    }
+
+    setPdfLoading(true);
+    setPdfError(null);
+
+    fetchPdfBlobUrl(preview)
+      .then((url) => {
+        if (!active) {
+          if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
+          return;
+        }
+        if (url && url.startsWith('blob:')) {
+          createdUrl = url;
+        }
+        setPdfPreviewBlobUrl(url);
+        setPdfLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        const fallback = resolveInlineDocumentUrl(preview);
+        setPdfPreviewBlobUrl(fallback);
+        setPdfError(err instanceof Error ? err.message : 'Could not prepare inline PDF preview.');
+        setPdfLoading(false);
+      });
+
+    return () => {
+      active = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
+  }, [preview]);
 
   if (!open || !patient) return null;
 
@@ -469,17 +526,16 @@ export function PatientDocumentsModal({
                             Open / Preview
                           </Button>
                         )}
-                        {doc.dataUrl && (
-                          <a
-                            className="btn btn-ghost btn-small"
-                            href={doc.dataUrl}
-                            download={doc.name}
+                        {resolveDocumentUrl(doc) && (
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            onClick={() => downloadFile(resolveDocumentUrl(doc), doc.name)}
+                            icon={<Download size={13} />}
                             title={`Download ${doc.name}`}
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                           >
-                            <Download size={13} />
                             Download
-                          </a>
+                          </Button>
                         )}
                         <Button
                           variant="ghost"
@@ -520,13 +576,14 @@ export function PatientDocumentsModal({
             <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
               <div style={{ display: 'flex', gap: '8px' }}>
                 {resolveDocumentUrl(preview) && (
-                  <a
-                    className="btn btn-secondary btn-small"
-                    href={resolveDocumentUrl(preview)}
-                    download={preview.name}
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={() => downloadFile(resolveDocumentUrl(preview), preview.name)}
+                    icon={<Download size={14} />}
                   >
-                    <Download size={14} style={{ marginRight: 6 }} /> Download file
-                  </a>
+                    Download file
+                  </Button>
                 )}
                 {resolveDocumentUrl(preview) && (
                   <Button
@@ -575,26 +632,97 @@ export function PatientDocumentsModal({
                   boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
                 }}
               />
-            ) : preview.mimeType === 'application/pdf' && resolveDocumentUrl(preview) ? (
-              <iframe
-                src={resolveDocumentUrl(preview)}
-                title={`Preview of ${preview.name}`}
-                style={{
-                  width: '100%',
-                  height: '65vh',
-                  border: 'none',
-                  borderRadius: '6px',
-                  background: '#FFFFFF',
-                }}
-              />
+            ) : preview.mimeType === 'application/pdf' || preview.name.toLowerCase().endsWith('.pdf') ? (
+              <div style={{ position: 'relative', width: '100%', height: '65vh', background: '#FFFFFF', borderRadius: '6px' }}>
+                {pdfLoading && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'rgba(255, 255, 255, 0.92)',
+                      zIndex: 10,
+                      borderRadius: 6,
+                    }}
+                  >
+                    <Loader2 size={36} className="animate-spin" style={{ color: '#13808D', marginBottom: 12 }} />
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--navy)' }}>Preparing PDF preview...</span>
+                  </div>
+                )}
+                {pdfPreviewBlobUrl ? (
+                  <object
+                    data={pdfPreviewBlobUrl}
+                    type="application/pdf"
+                    style={{ width: '100%', height: '100%', border: 'none', borderRadius: '6px', background: '#FFFFFF' }}
+                  >
+                    <iframe
+                      src={pdfPreviewBlobUrl}
+                      title={`Preview of ${preview.name}`}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        border: 'none',
+                        borderRadius: '6px',
+                        background: '#FFFFFF',
+                      }}
+                    />
+                  </object>
+                ) : !pdfLoading && (
+                  <div
+                    style={{
+                      padding: 30,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      height: '100%',
+                      background: '#F8FAFC',
+                      borderRadius: 6,
+                      color: 'var(--navy)',
+                    }}
+                  >
+                    <FileText size={48} style={{ color: '#13808D', marginBottom: 12, opacity: 0.8 }} />
+                    <p style={{ fontWeight: 600, marginBottom: 6 }}>{preview.name}</p>
+                    <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+                      {pdfError || 'Direct inline preview could not be loaded.'}
+                    </p>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <Button
+                        variant="primary"
+                        size="small"
+                        onClick={() => window.open(pdfPreviewBlobUrl || resolveDocumentUrl(preview), '_blank', 'noopener,noreferrer')}
+                        icon={<ExternalLink size={14} />}
+                      >
+                        Open in New Tab
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="small"
+                        onClick={() => downloadFile(pdfPreviewBlobUrl || resolveDocumentUrl(preview), preview.name)}
+                        icon={<Download size={14} />}
+                      >
+                        Download PDF
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : (
               <div style={{ color: '#FFFFFF', textAlign: 'center' }}>
                 <FileText size={48} style={{ margin: '0 auto 12px', opacity: 0.8 }} />
                 <p>This file type cannot be previewed directly in the browser.</p>
-                {preview.dataUrl && (
-                  <a className="btn btn-primary btn-small" href={preview.dataUrl} download={preview.name}>
-                    <Download size={14} /> Download to view
-                  </a>
+                {resolveDocumentUrl(preview) && (
+                  <Button
+                    variant="primary"
+                    size="small"
+                    onClick={() => downloadFile(resolveDocumentUrl(preview), preview.name)}
+                    icon={<Download size={14} />}
+                  >
+                    Download to view
+                  </Button>
                 )}
               </div>
             )}

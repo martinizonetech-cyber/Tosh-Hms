@@ -147,7 +147,7 @@ async def seed_database() -> None:
             raise ValueError("Initial staff passwords must be configured in environment / backend/.env")
 
         reception_user = User(
-            email="reception@northstar.demo",
+            email="reception@gmail.com",
             password_hash=hash_password(reception_pw),
             role="reception",
             display_name="Reception Desk",

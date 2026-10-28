@@ -6,7 +6,7 @@ from app.core.errors import ForbiddenException
 from app.core.schemas import CamelModel
 from app.db.session import get_db
 from app.modules.audit.service import log_audit_event
-from app.modules.auth.dependencies import get_current_user, require_role
+from app.modules.auth.dependencies import require_role
 from app.modules.catalog.models import BodyRegionTemplate
 from app.modules.users.models import User
 
@@ -35,7 +35,6 @@ class BodyRegionDefinitionSchema(CamelModel):
 @router.get("", response_model=list[BodyRegionDefinitionSchema], summary="Get body region clinical templates")
 async def get_body_region_templates(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ) -> list[BodyRegionDefinitionSchema]:
     stmt = select(BodyRegionTemplate).order_by(BodyRegionTemplate.region.asc())
     res = await db.execute(stmt)
@@ -112,4 +111,4 @@ async def update_body_region_templates(
     )
 
     await db.commit()
-    return await get_body_region_templates(db, current_user)
+    return await get_body_region_templates(db)

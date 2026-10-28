@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck, UserCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Globe, Lock, Mail, ShieldCheck, UserCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { PortalRole } from '../../types/domain';
 import { useToast } from '../../components/ui/Toast';
@@ -56,7 +56,7 @@ export function LoginPage() {
           setEmail(matching.email);
         }
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   const doctorsForDepartment = doctors.filter((d) => d.department === selectedRole);
@@ -98,8 +98,8 @@ export function LoginPage() {
         user.role === 'reception'
           ? '/reception/dashboard'
           : user.role === 'skin'
-          ? '/skin/dashboard'
-          : '/ortho/dashboard';
+            ? '/skin/dashboard'
+            : '/ortho/dashboard';
       navigate(targetPath);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : 'Login failed. Please check credentials.';
@@ -116,7 +116,27 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <main className="login-panel">
-        <div className="login-brand">
+        <div className="login-top-bar">
+          <button
+            type="button"
+            className="login-back-btn"
+            onClick={() => navigate('/')}
+            title="Return to hospital overview & services"
+          >
+            <ArrowLeft size={14} />
+            <span>Hospital Landing Page</span>
+          </button>
+          <span className="login-portal-tag">Staff Portal</span>
+        </div>
+
+        <div
+          className="login-brand login-brand-clickable"
+          onClick={() => navigate('/')}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/'); }}
+          title="Go to Tosh Hospital Home Page"
+        >
           <span className="brand-mark login-brand-mark">
             <img
               className="brand-logo login-brand-logo"
@@ -249,6 +269,25 @@ export function LoginPage() {
               <ArrowRight size={17} />
             </button>
           </form>
+        </div>
+
+        <div className="login-landing-banner">
+          <div className="login-landing-banner-info">
+            <Globe size={16} className="login-landing-banner-icon" />
+            <div>
+              <strong>Patient or visitor?</strong>
+              <span>Explore our clinical services, specialties & doctor profiles.</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="login-landing-banner-btn"
+            onClick={() => navigate('/')}
+            title="Locate Tosh Hospital Landing Page"
+          >
+            <span>Hospital Home</span>
+            <ArrowRight size={13} />
+          </button>
         </div>
 
         <p className="login-footnote">

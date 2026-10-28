@@ -107,3 +107,135 @@ export const resolveDocumentUrl = (doc?: { url?: string; dataUrl?: string } | nu
   return doc.dataUrl || '';
 };
 
+/**
+ * Returns an inline-safe URL for document preview.
+ * Prefers local dataUrl if present (avoids network requests).
+ * Appends /view to backend file endpoints so browser download managers (like IDM)
+ * do not intercept inline PDF embedding.
+ */
+export const resolveInlineDocumentUrl = (doc?: { url?: string; dataUrl?: string } | null): string => {
+  if (!doc) return '';
+  if (doc.dataUrl) return doc.dataUrl;
+  const url = resolveDocumentUrl(doc);
+  if (url && url.includes('/api/v1/documents/files/') && !url.includes('/view')) {
+    const [base, query] = url.split('?');
+    return `${base}/view${query ? `?${query}` : ''}`;
+  }
+  return url;
+};
+
+/**
+ * Resolves a reliable local Blob URL for inline PDF previewing.
+ * Converts base64 data URLs or fetches remote document bytes into a local Blob URL
+ * (blob:http://localhost:3000/...), which ensures same-origin rendering in Chrome,
+ * eliminates CORS issues, and prevents IDM or other download managers from hijacking the PDF preview.
+ */
+export const fetchPdfBlobUrl = async (doc?: { url?: string; dataUrl?: string; name?: string } | null): Promise<string> => {
+  if (!doc) return '';
+
+  // 1. Priority: Local dataUrl (already in memory from upload)
+  if (doc.dataUrl) {
+    if (doc.dataUrl.startsWith('blob:')) return doc.dataUrl;
+    if (doc.dataUrl.startsWith('data:')) {
+      try {
+        const res = await fetch(doc.dataUrl);
+        const blob = await res.blob();
+        const pdfBlob = new Blob([blob], { type: 'application/pdf' });
+        return URL.createObjectURL(pdfBlob);
+      } catch {
+        return doc.dataUrl;
+      }
+    }
+    return doc.dataUrl;
+  }
+
+  const rawUrl = resolveDocumentUrl(doc);
+  if (!rawUrl) return '';
+  if (rawUrl.startsWith('blob:')) return rawUrl;
+  if (rawUrl.startsWith('data:')) {
+    try {
+      const res = await fetch(rawUrl);
+      const blob = await res.blob();
+      return URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+    } catch {
+      return rawUrl;
+    }
+  }
+
+  // 2. Remote signed URL: Request with view suffix and anti-hijack headers
+  let requestUrl = rawUrl;
+  if (rawUrl.includes('/api/v1/documents/files/')) {
+    const [base, query] = rawUrl.split('?');
+    if (!base.endsWith('/view')) {
+      requestUrl = `${base}/view${query ? `?${query}` : ''}`;
+    }
+  }
+
+  try {
+    const headers = new Headers();
+    headers.set('X-Requested-With', 'XMLHttpRequest');
+    headers.set('Accept', 'application/pdf, */*');
+    const res = await fetch(requestUrl, { headers, credentials: 'include' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const pdfBlob = new Blob([blob], { type: 'application/pdf' });
+    return URL.createObjectURL(pdfBlob);
+  } catch {
+    // Retry with rawUrl directly
+    try {
+      const res = await fetch(rawUrl, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      return URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+    } catch {
+      return resolveInlineDocumentUrl(doc);
+    }
+  }
+};
+
+export const downloadFile = async (url: string, filename: string): Promise<void> => {
+  if (!url) return;
+  const safeFilename = filename || 'download';
+
+  // 1. Direct download for data URLs
+  if (url.startsWith('data:')) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safeFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+
+  // 2. Fetch as blob to bypass cross-origin browser download restriction
+  try {
+    const res = await fetch(url, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      credentials: 'include',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = safeFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+  } catch {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safeFilename;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+};
+

@@ -19,8 +19,10 @@ export class ApiRequestError extends Error {
 }
 
 const ACCESS_TOKEN_KEY = 'tosh_access_token';
+const REFRESH_TOKEN_KEY = 'tosh_refresh_token';
 
 let inMemoryAccessToken: string | null = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(ACCESS_TOKEN_KEY) : null;
+let inMemoryRefreshToken: string | null = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(REFRESH_TOKEN_KEY) : null;
 type AuthExpiredListener = () => void;
 const authExpiredListeners: Set<AuthExpiredListener> = new Set();
 
@@ -33,6 +35,24 @@ export function setAccessToken(token: string | null): void {
       sessionStorage.removeItem(ACCESS_TOKEN_KEY);
     }
   }
+}
+
+export function setRefreshToken(token: string | null): void {
+  inMemoryRefreshToken = token;
+  if (typeof sessionStorage !== 'undefined') {
+    if (token) {
+      sessionStorage.setItem(REFRESH_TOKEN_KEY, token);
+    } else {
+      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
+  }
+}
+
+export function getRefreshToken(): string | null {
+  if (!inMemoryRefreshToken && typeof sessionStorage !== 'undefined') {
+    inMemoryRefreshToken = sessionStorage.getItem(REFRESH_TOKEN_KEY);
+  }
+  return inMemoryRefreshToken;
 }
 
 export function getAccessToken(): string | null {
@@ -64,24 +84,32 @@ async function attemptTokenRefresh(): Promise<string | null> {
 
   refreshPromise = (async () => {
     try {
+      const storedRefreshToken = getRefreshToken();
       const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
         headers: {
+          'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
+        body: storedRefreshToken ? JSON.stringify({ refreshToken: storedRefreshToken }) : undefined,
       });
       if (!res.ok) {
         setAccessToken(null);
+        setRefreshToken(null);
         notifyAuthExpired();
         return null;
       }
       const data = await res.json();
       const newToken = data.accessToken as string;
       setAccessToken(newToken);
+      if (data.refreshToken) {
+        setRefreshToken(data.refreshToken as string);
+      }
       return newToken;
     } catch {
       setAccessToken(null);
+      setRefreshToken(null);
       notifyAuthExpired();
       return null;
     } finally {
@@ -110,8 +138,9 @@ export async function requestJson<TResponse>(
   }
   headers.set('Accept', 'application/json');
 
-  if (inMemoryAccessToken && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${inMemoryAccessToken}`);
+  const token = getAccessToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
   let response: Response;

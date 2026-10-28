@@ -3,14 +3,16 @@ import { z } from 'zod';
 export const patientSchema = z.object({
   fullName: z.string().trim().min(2, 'Enter the patient’s full name.').max(60, 'Name must be under 60 characters.'),
   dateOfBirth: z.string().min(1, 'Choose a date of birth.'),
-  gender: z.enum(['Female', 'Male', 'Other', 'Prefer not to say']),
+  gender: z.enum(['Female', 'Male', 'Other']),
   phone: z.string().trim()
-    .min(7, 'Enter a valid phone number (at least 7 digits).')
-    .max(13, 'Phone number must be at most 13 digits.')
-    .regex(/^\d+$/, 'Phone number must contain numbers only.'),
+    .length(10, 'Mobile number must be exactly 10 digits.')
+    .regex(/^\d{10}$/, 'Mobile number must contain numbers only.'),
   email: z.union([z.string().email('Enter a valid email address.').max(80), z.literal('')]).optional(),
   address: z.string().trim().min(4, 'Enter the patient’s address.').max(150, 'Address must be under 150 characters.'),
-  emergencyContact: z.string().max(60).optional(),
+  emergencyContact: z.union([
+    z.string().trim().regex(/^\d{10}$/, 'Emergency contact must be a 10-digit mobile number.'),
+    z.literal('')
+  ]).optional(),
 });
 
 export const appointmentSchema = z.object({

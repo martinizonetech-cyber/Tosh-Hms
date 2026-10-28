@@ -20,7 +20,7 @@ import { TablePagination, usePagination } from '../../components/ui/Pagination';
 
 import { fetchDoctors, getDoctorsByDepartment } from '../../services/doctors/doctorService';
 
-const blankPatient = { fullName: '', dateOfBirth: '', gender: 'Prefer not to say' as Gender, phone: '', email: '', address: '', emergencyContact: '' };
+const blankPatient = { fullName: '', dateOfBirth: '', gender: 'Male' as Gender, phone: '', email: '', address: '', emergencyContact: '' };
 
 export function AppointmentsPage() {
   const { state, repository } = useHospitalData();
@@ -80,22 +80,44 @@ export function AppointmentsPage() {
   const phoneRegister = newPatientForm.register('phone');
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 13);
+    const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 10);
     e.target.value = digitsOnly;
     phoneRegister.onChange(e);
   };
 
   const handlePhonePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
-    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 13);
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 10);
     const input = e.currentTarget;
     const currentVal = input.value || '';
     const start = input.selectionStart ?? currentVal.length;
     const end = input.selectionEnd ?? currentVal.length;
-    const nextVal = (currentVal.slice(0, start) + pasted + currentVal.slice(end)).replace(/\D/g, '').slice(0, 13);
+    const nextVal = (currentVal.slice(0, start) + pasted + currentVal.slice(end)).replace(/\D/g, '').slice(0, 10);
     input.value = nextVal;
     phoneRegister.onChange({
       target: { name: 'phone', value: nextVal },
+    } as unknown as React.ChangeEvent<HTMLInputElement>);
+  };
+
+  const emergencyRegister = newPatientForm.register('emergencyContact');
+
+  const handleEmergencyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 10);
+    e.target.value = digitsOnly;
+    emergencyRegister.onChange(e);
+  };
+
+  const handleEmergencyPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 10);
+    const input = e.currentTarget;
+    const currentVal = input.value || '';
+    const start = input.selectionStart ?? currentVal.length;
+    const end = input.selectionEnd ?? currentVal.length;
+    const nextVal = (currentVal.slice(0, start) + pasted + currentVal.slice(end)).replace(/\D/g, '').slice(0, 10);
+    input.value = nextVal;
+    emergencyRegister.onChange({
+      target: { name: 'emergencyContact', value: nextVal },
     } as unknown as React.ChangeEvent<HTMLInputElement>);
   };
 
@@ -161,7 +183,7 @@ export function AppointmentsPage() {
     <Card padded={false}><div style={{ padding: '18px 20px 0' }}><SectionHeading title="Appointment schedule" subtitle="Date-based list adapts to smaller screens without a desktop-only calendar." /></div>
       <div className="schedule-date-toolbar"><div className="date-navigation"><Button variant="secondary" size="small" aria-label="Previous day" onClick={() => dateMove(-1)} icon={<ArrowLeft size={14} />}>Previous</Button><label className="date-display"><CalendarDays size={15} /><input aria-label="Choose appointment date" type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} /><Clock3 size={14} /><strong>{dateLabel(`${dateFilter}T00:00:00`)}</strong></label><Button variant="secondary" size="small" aria-label="Next day" onClick={() => dateMove(1)} icon={<ArrowRight size={14} />}>Next</Button><Button variant="ghost" size="small" onClick={() => setDateFilter(format(new Date(), 'yyyy-MM-dd'))}>Today</Button></div>
       <div className="toolbar"><div className="search-field"><Search size={15} /><input aria-label="Search appointments" placeholder="Search patient or doctor" value={search} onChange={(event) => setSearch(event.target.value)} /></div><select className="select-field" aria-label="Filter appointments by department" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)}><option value="all">All departments</option><option value="skin">Skin</option><option value="orthopaedics">Orthopaedics</option></select><select className="select-field" aria-label="Filter appointments by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option>{['Scheduled', 'Checked-in', 'In progress', 'Completed', 'Cancelled', 'No-show'].map((status) => <option key={status}>{status}</option>)}</select><span className="result-count">{filtered.length} visits</span></div></div>
-      {filtered.length ? <><div className="table-wrap responsive-cards"><table className="data-table"><thead><tr><th className="serial-col">S.No</th><th>Time / Patient</th><th>Department / Doctor</th><th>Visit type</th><th style={{ textAlign: 'center', width: 120 }}>Status</th><th className="actions-col" style={{ textAlign: 'center' }}>Actions</th></tr></thead><tbody>{pagedItems.map((item, index) => { const patient = state.patients.find((person) => person.id === item.patientId); const serialNo = (page - 1) * pageSize + index + 1; return <tr key={item.id}><td className="serial-cell">{serialNo}</td><td><div className="patient-cell"><span className="appointment-time">{timeLabel(item.startsAt)}</span><div><strong>{patient?.fullName ?? 'Patient'}</strong><span>{patient?.id ?? item.patientId} · {item.id}</span></div></div></td><td>{item.department === 'skin' ? 'Skin' : 'Orthopaedics'}<span className="table-subtext">{item.doctor}</span></td><td>{item.visitType}</td><td style={{ textAlign: 'center' }}><Badge tone={statusTone(item.status)}>{item.status}</Badge></td><td className="actions-cell" style={{ textAlign: 'center' }}><AppointmentActions appointmentId={item.id} status={item.status} onChange={changeStatus} onReschedule={() => { setRescheduling(item.id); setRescheduleValue(localDateTimeInput(new Date(item.startsAt))); }} /></td></tr>; })}</tbody></table></div>
+      {filtered.length ? <><div className="table-wrap responsive-cards"><table className="data-table"><thead><tr><th className="serial-col">S.No</th><th>Time / Patient</th><th>Department / Doctor</th><th>Visit type</th><th style={{ textAlign: 'center', width: 120 }}>Status</th><th className="actions-col" style={{ textAlign: 'right', width: 260, paddingRight: 20 }}>Actions</th></tr></thead><tbody>{pagedItems.map((item, index) => { const patient = state.patients.find((person) => person.id === item.patientId); const serialNo = (page - 1) * pageSize + index + 1; return <tr key={item.id}><td className="serial-cell">{serialNo}</td><td><div className="patient-cell"><span className="appointment-time">{timeLabel(item.startsAt)}</span><div><strong>{patient?.fullName ?? 'Patient'}</strong><span>{patient?.id ?? item.patientId} · {item.id}</span></div></div></td><td>{item.department === 'skin' ? 'Skin' : 'Orthopaedics'}<span className="table-subtext">{item.doctor}</span></td><td>{item.visitType}</td><td style={{ textAlign: 'center' }}><Badge tone={statusTone(item.status)}>{item.status}</Badge></td><td className="actions-cell" style={{ textAlign: 'right', paddingRight: 20 }}><AppointmentActions appointmentId={item.id} status={item.status} onChange={changeStatus} onReschedule={() => { setRescheduling(item.id); setRescheduleValue(localDateTimeInput(new Date(item.startsAt))); }} /></td></tr>; })}</tbody></table></div>
       <div className="patient-card-list appointment-card-list">{pagedItems.map((item, index) => { const patient = state.patients.find((person) => person.id === item.patientId); const serialNo = (page - 1) * pageSize + index + 1; return <article className="patient-card" key={item.id}><div className="patient-card-head"><div className="patient-card-name"><span className="serial-cell" style={{ marginRight: 6 }}>#{serialNo}</span><PatientAvatar name={patient?.fullName ?? 'Patient'} /><div><strong>{patient?.fullName ?? 'Patient'}</strong><span>{patient?.id} · {timeLabel(item.startsAt)}</span></div></div><Badge tone={statusTone(item.status)}>{item.status}</Badge></div><div className="patient-card-meta"><div><small>Department / Doctor</small><strong>{item.department === 'skin' ? 'Skin' : 'Orthopaedics'} · {item.doctor}</strong></div><div><small>Visit type</small><strong>{item.visitType}</strong></div></div><AppointmentActions appointmentId={item.id} status={item.status} onChange={changeStatus} onReschedule={() => { setRescheduling(item.id); setRescheduleValue(localDateTimeInput(new Date(item.startsAt))); }} /></article>; })}</div>
       <TablePagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={setPageSize} />
       </> : <EmptyState title="No appointments on this date" message="Try another date or create a new appointment." icon={<CalendarDays size={18} />} action={<Button size="small" onClick={openCreate}>Schedule a visit</Button>} />}
@@ -248,22 +270,43 @@ export function AppointmentsPage() {
         </> : <>
           <Field id="new-patient-name" label="Full name" required maxLength={60} placeholder="Patient's full name" error={newPatientForm.formState.errors.fullName?.message as string} {...newPatientForm.register('fullName')} />
           <Field id="new-patient-dob" label="Date of birth" type="date" required max={format(new Date(), 'yyyy-MM-dd')} min="1900-01-01" error={newPatientForm.formState.errors.dateOfBirth?.message as string} {...newPatientForm.register('dateOfBirth')} />
-          <div className="field"><label htmlFor="new-patient-gender">Gender</label><select id="new-patient-gender" className="control" {...newPatientForm.register('gender')}><option>Prefer not to say</option><option>Female</option><option>Male</option><option>Other</option></select></div>
+          <div className="field">
+            <label htmlFor="new-patient-gender">Gender</label>
+            <select id="new-patient-gender" className="control" {...newPatientForm.register('gender')}>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+            </select>
+            {newPatientForm.formState.errors.gender && (
+              <span className="field-error">{newPatientForm.formState.errors.gender.message as string}</span>
+            )}
+          </div>
           <Field
             id="new-patient-phone"
-            label="Phone"
+            label="Mobile number"
             required
             type="tel"
             inputMode="numeric"
-            maxLength={13}
-            placeholder="e.g. 9876543210"
+            maxLength={10}
+            placeholder="10-digit mobile number"
             error={newPatientForm.formState.errors.phone?.message as string}
             {...phoneRegister}
             onChange={handlePhoneChange}
             onPaste={handlePhonePaste}
           />
           <Field id="new-patient-email" label="Email (optional)" type="email" maxLength={80} placeholder="name@example.com" error={newPatientForm.formState.errors.email?.message as string} {...newPatientForm.register('email')} />
-          <Field id="new-patient-emergency" label="Emergency contact" type="text" maxLength={60} placeholder="Contact name or phone" {...newPatientForm.register('emergencyContact')} />
+          <Field
+            id="new-patient-emergency"
+            label="Emergency contact (optional)"
+            type="tel"
+            inputMode="numeric"
+            maxLength={10}
+            placeholder="10-digit emergency number"
+            error={newPatientForm.formState.errors.emergencyContact?.message as string}
+            {...emergencyRegister}
+            onChange={handleEmergencyChange}
+            onPaste={handleEmergencyPaste}
+          />
           <Field id="new-patient-address" label="Address" required maxLength={150} placeholder="Street address, locality, city" className="span-3" error={newPatientForm.formState.errors.address?.message as string} {...newPatientForm.register('address')} />
         </>}
         <div className="field"><label htmlFor="appointment-department">Department</label><select id="appointment-department" className="control" value={selectedDepartment} onChange={(event) => changeDepartment(event.target.value as Department)}><option value="skin">Skin / Dermatology</option><option value="orthopaedics">Orthopaedics</option></select></div>
@@ -277,5 +320,5 @@ export function AppointmentsPage() {
 }
 
 function AppointmentActions({ appointmentId, status, onChange, onReschedule }: { appointmentId: string; status: string; onChange: (id: string, status: 'Checked-in' | 'No-show' | 'Cancelled' | 'Completed') => void; onReschedule: () => void }) {
-  return <div className="appointment-actions">{status === 'Scheduled' && <Button variant="secondary" size="small" onClick={() => onChange(appointmentId, 'Checked-in')} icon={<Check size={13} />}>Check in</Button>}{!['Cancelled', 'No-show', 'Completed'].includes(status) && <Button variant="ghost" size="small" onClick={onReschedule}>Reschedule</Button>}{status === 'Scheduled' && <Button variant="ghost" size="small" onClick={() => onChange(appointmentId, 'No-show')}>No-show</Button>}{!['Cancelled', 'Completed', 'No-show'].includes(status) && <Button variant="ghost" size="small" onClick={() => onChange(appointmentId, 'Cancelled')}>Cancel</Button>}</div>;
+  return <div className="appointment-actions" style={{ justifyContent: 'flex-end', gap: 6 }}>{status === 'Scheduled' && <Button variant="secondary" size="small" onClick={() => onChange(appointmentId, 'Checked-in')} icon={<Check size={13} />}>Check in</Button>}{!['Cancelled', 'No-show', 'Completed'].includes(status) && <Button variant="ghost" size="small" onClick={onReschedule}>Reschedule</Button>}{status === 'Scheduled' && <Button variant="ghost" size="small" onClick={() => onChange(appointmentId, 'No-show')}>No-show</Button>}{!['Cancelled', 'Completed', 'No-show'].includes(status) && <Button variant="ghost" size="small" onClick={() => onChange(appointmentId, 'Cancelled')}>Cancel</Button>}</div>;
 }

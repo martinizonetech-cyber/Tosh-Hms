@@ -20,7 +20,7 @@ import {
 import { useSearchParams } from 'react-router-dom';
 import type { Patient, PatientDocument } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';
-import { dateLabel, departmentLabel, money, patientInvoiceTotals, resolveDocumentUrl } from '../../utils/format';
+import { dateLabel, departmentLabel, downloadFile, money, patientInvoiceTotals, resolveDocumentUrl, resolveInlineDocumentUrl } from '../../utils/format';
 import { matchesPatient } from '../../utils/patientSearch';
 import { useToast } from '../../components/ui/Toast';
 import { PageHeading, PatientAvatar } from '../../components/shared/Primitives';
@@ -365,9 +365,14 @@ function ProfileModal({ patient, onClose }: { patient: Patient | null; onClose: 
                           </Button>
                         )}
                         {resolveDocumentUrl(doc) && (
-                          <a className="btn btn-ghost btn-small" href={resolveDocumentUrl(doc)} download={doc.name}>
-                            <Download size={13} /> Download
-                          </a>
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            onClick={() => downloadFile(resolveDocumentUrl(doc), doc.name)}
+                            icon={<Download size={13} />}
+                          >
+                            Download
+                          </Button>
                         )}
                         <Button variant="ghost" size="small" onClick={() => removeDoc(doc.id, doc.visitId)} icon={<Trash2 size={13} />}>
                           Remove
@@ -405,9 +410,14 @@ function ProfileModal({ patient, onClose }: { patient: Patient | null; onClose: 
           <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
               {resolveDocumentUrl(previewDoc) && (
-                <a className="btn btn-secondary btn-small" href={resolveDocumentUrl(previewDoc)} download={previewDoc.name}>
-                  <Download size={14} style={{ marginRight: 6 }} /> Download file
-                </a>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => downloadFile(resolveDocumentUrl(previewDoc), previewDoc.name)}
+                  icon={<Download size={14} />}
+                >
+                  Download file
+                </Button>
               )}
               {resolveDocumentUrl(previewDoc) && (
                 <Button
@@ -446,7 +456,7 @@ function ProfileModal({ patient, onClose }: { patient: Patient | null; onClose: 
           {previewDoc.mimeType.startsWith('image/') && resolveDocumentUrl(previewDoc) ? (
             <img src={resolveDocumentUrl(previewDoc)} alt={previewDoc.name} style={{ maxWidth: '100%', maxHeight: '65vh', objectFit: 'contain' }} />
           ) : previewDoc.mimeType === 'application/pdf' && resolveDocumentUrl(previewDoc) ? (
-            <iframe src={resolveDocumentUrl(previewDoc)} title={`Preview of ${previewDoc.name}`} style={{ width: '100%', height: '65vh', border: 'none', background: '#FFF' }} />
+            <iframe src={resolveInlineDocumentUrl(previewDoc)} title={`Preview of ${previewDoc.name}`} style={{ width: '100%', height: '65vh', border: 'none', background: '#FFF' }} />
           ) : (
             <p style={{ color: '#FFF' }}>This file type has no inline preview.</p>
           )}
