@@ -76,13 +76,13 @@ export const createSeedState = (): DemoState => ({
   ],
   queue: [
     { id: 'Q-5101', visitId: 'VIS-8801', vitals, token: 'S-018', patientId: 'PT-2041', department: 'skin', doctor: 'Dr. Sangamitra', arrivalAt: at(0, 9, 12), status: 'Waiting', paymentStatus: 'Due', visitType: 'Follow-up', note: 'Review skin-care routine' },
-    { id: 'Q-5102', visitId: 'VIS-8804', vitals, token: 'O-011', patientId: 'PT-2044', department: 'orthopaedics', doctor: 'Dr. Sundarprakash', arrivalAt: at(0, 9, 25), status: 'Consulting', paymentStatus: 'Partial', visitType: 'Follow-up', note: 'Shoulder symptoms' },
+    { id: 'Q-5102', visitId: 'VIS-8804', vitals, token: 'O-011', patientId: 'PT-2044', department: 'orthopaedics', doctor: 'Dr. Sundarprakash', arrivalAt: at(0, 9, 25), status: 'Consulting', paymentStatus: 'Due', visitType: 'Follow-up', note: 'Shoulder symptoms' },
     { id: 'Q-5103', token: 'S-019', patientId: 'PT-2045', department: 'skin', doctor: 'Dr. Sangamitra', arrivalAt: at(0, 9, 41), status: 'Waiting', paymentStatus: 'Due', visitType: 'Walk-in', note: 'Itching; clinician review' },
   ],
   invoices: [
     { id: 'INV-3401', patientId: 'PT-2041', visitId: 'VIS-8801', department: 'skin', visitLabel: 'Skin consultation · APT-7201', date: at(0, 9, 30), consultationFee: 700, charges: [], payments: [] },
     { id: 'INV-3402', patientId: 'PT-2042', visitId: 'VIS-8802', department: 'orthopaedics', visitLabel: 'Orthopaedics follow-up · APT-7202', date: at(0, 10), consultationFee: 900, charges: [{ id: 'CH-10', description: 'Support assessment', amount: 350, addedBy: 'Dr. Sundarprakash', createdAt: at(0, 8) }], payments: [{ id: 'PAY-11', amount: 500, method: 'UPI', transactionReference: 'DEMO-UPI-4418', paidAt: at(0, 8, 10) }] },
-    { id: 'INV-3403', patientId: 'PT-2044', visitId: 'VIS-8804', department: 'orthopaedics', visitLabel: 'Orthopaedics consultation · APT-7204', date: at(0, 11), consultationFee: 900, charges: [], payments: [{ id: 'PAY-12', amount: 900, method: 'Cash', paidAt: at(0, 9, 40) }] },
+    { id: 'INV-3403', patientId: 'PT-2044', visitId: 'VIS-8804', department: 'orthopaedics', visitLabel: 'Orthopaedics consultation · APT-7204', date: at(0, 11), consultationFee: 900, charges: [], payments: [] },
   ],
   consultations,
   followUps: [

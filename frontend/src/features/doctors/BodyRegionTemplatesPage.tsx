@@ -298,15 +298,15 @@ export function BodyRegionTemplatesPage() {
     <>
       <PageHeading
         eyebrow="Orthopaedics · Configuration"
-        title="Body Region Templates"
+        title="Meditation"
         description="Manage body regions, examination fields, and standard 10 tablets for each condition. Clicking Knee or any region in Consultation automatically loads these tablets with one-click Select All selection."
         actions={
           <div className="button-row">
             <Button variant="secondary" onClick={() => setAddingRegion(true)} icon={<Plus size={15} />}>
-              Add Body Region
+              Add Meditation
             </Button>
             <Button onClick={save} disabled={saving} icon={<Save size={15} />}>
-              {saving ? 'Saving...' : 'Save Templates'}
+              {saving ? 'Saving...' : 'Save Meditation'}
             </Button>
           </div>
         }
@@ -316,11 +316,11 @@ export function BodyRegionTemplatesPage() {
         {/* Regions List */}
         <Card>
           <SectionHeading
-            title="Body Regions"
+            title="Meditation"
             subtitle="Choose a region to customize its examination prompts and default 10 tablets."
             action={
               <Button size="small" variant="secondary" onClick={() => setAddingRegion(true)} icon={<Plus size={14} />}>
-                Add Region
+                Add Meditation
               </Button>
             }
           />
@@ -581,7 +581,7 @@ export function BodyRegionTemplatesPage() {
       {/* Add New Region Modal */}
       <Modal
         open={addingRegion}
-        title="Add New Body Region"
+        title="Add New Meditation"
         subtitle="Create a new orthopaedic region template with customizable examination fields and manually added tablets."
         onClose={() => {
           setAddingRegion(false);
@@ -601,14 +601,14 @@ export function BodyRegionTemplatesPage() {
               Cancel
             </Button>
             <Button onClick={handleAddRegion} icon={<Plus size={14} />}>
-              Create Region
+              Create Meditation
             </Button>
           </>
         }
       >
         <div className="stack" style={{ gap: 14 }}>
           <div className="field">
-            <label htmlFor="new-region-name">Body Region Name *</label>
+            <label htmlFor="new-region-name">Meditation Name *</label>
             <input
               id="new-region-name"
               className="control"

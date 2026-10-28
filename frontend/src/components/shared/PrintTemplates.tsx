@@ -209,6 +209,11 @@ export function PrintRxTable({ items }: { items: PrescriptionItem[] }) {
               <td>
                 <div className="print-med-name">{item.medicineName}</div>
                 <div className="print-med-strength">{item.strength}</div>
+                {item.appliedAreas && item.appliedAreas.length > 0 && (
+                  <div style={{ fontSize: '11px', color: '#047857', fontWeight: 600, marginTop: '2px' }}>
+                    📍 Area: {item.appliedAreas.join(', ')}
+                  </div>
+                )}
               </td>
               <td>
                 <div>{item.dosage}</div>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { Check, CheckCheck, ClipboardList, Edit2, FileText, PlusCircle, Printer, RotateCcw, Save, Stethoscope } from 'lucide-react';
+import { Check, CheckCheck, ClipboardList, Edit2, FileText, Printer, Save, Stethoscope } from 'lucide-react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Consultation, Department, PrescriptionItem } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';

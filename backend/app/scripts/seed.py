@@ -453,15 +453,7 @@ async def seed_database() -> None:
             recorded_by=reception_user.id,
         ))
 
-        # Payments on Invoice 3
-        session.add(Payment(
-            display_id="PAY-12",
-            invoice_id=inv3.id,
-            amount=90000,  # ₹900
-            method="Cash",
-            paid_at=at(0, 9, 40),
-            recorded_by=reception_user.id,
-        ))
+        # Invoice 3 starts unpaid (Due) for reception workflow
 
         # 12. Follow-ups
         print("Seeding follow-ups...")

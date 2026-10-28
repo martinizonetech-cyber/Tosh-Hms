@@ -106,6 +106,29 @@ const QUICK_INSTRUCTION_CHIPS = [
   'As needed (SOS)',
 ];
 
+const COMMON_APPLICATION_AREAS = [
+  'Face',
+  'Forehead',
+  'Cheeks',
+  'Nose',
+  'Around Eyes',
+  'Neck',
+  'Scalp',
+  'Chest',
+  'Upper Back',
+  'Lower Back',
+  'Shoulders',
+  'Arms',
+  'Elbows',
+  'Wrists & Hands',
+  'Abdomen',
+  'Thighs',
+  'Knees',
+  'Legs',
+  'Ankles & Feet',
+  'Affected Area(s)',
+];
+
 const COMMON_MEDICINE_SUGGESTIONS = [
   'Paracetamol',
   'Pantoprazole',
@@ -154,6 +177,7 @@ const defaultFormValues = {
   frequency: 'Twice daily',
   duration: '5 days',
   instructions: '',
+  appliedAreas: [] as string[],
 };
 
 export function PrescriptionPanel({
@@ -176,6 +200,47 @@ export function PrescriptionPanel({
   // Manual entry form state
   const [formState, setFormState] = useState(defaultFormValues);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [customAreaInput, setCustomAreaInput] = useState('');
+  const [showAreaSectionManual, setShowAreaSectionManual] = useState(false);
+
+  const toggleArea = (area: string) => {
+    setFormState((prev) => {
+      const exists = prev.appliedAreas.includes(area);
+      return {
+        ...prev,
+        appliedAreas: exists
+          ? prev.appliedAreas.filter((a) => a !== area)
+          : [...prev.appliedAreas, area],
+      };
+    });
+  };
+
+  const handleAddCustomArea = () => {
+    const trimmed = customAreaInput.trim();
+    if (!trimmed) return;
+    setFormState((prev) => {
+      if (prev.appliedAreas.includes(trimmed)) return prev;
+      return {
+        ...prev,
+        appliedAreas: [...prev.appliedAreas, trimmed],
+      };
+    });
+    setCustomAreaInput('');
+  };
+
+  const isCreamOrTopical =
+    formState.dosage === 'Cream' ||
+    formState.dosage === 'Ointment' ||
+    formState.dosage === 'Gel' ||
+    formState.dosage === 'Lotion' ||
+    formState.dosage === 'Patch' ||
+    formState.route === 'Topical' ||
+    formState.medicineName.toLowerCase().includes('cream') ||
+    formState.medicineName.toLowerCase().includes('gel') ||
+    formState.medicineName.toLowerCase().includes('ointment') ||
+    formState.medicineName.toLowerCase().includes('lotion') ||
+    formState.appliedAreas.length > 0 ||
+    showAreaSectionManual;
 
   // Upload state
   const [imageDragging, setImageDragging] = useState(false);
@@ -258,7 +323,7 @@ export function PrescriptionPanel({
   const prescriptionImages = consultation.prescriptionImages ?? [];
   const hasPrescriptionContent = consultation.prescription.length > 0 || prescriptionImages.length > 0;
 
-  // Body Region Templates
+  // Meditation
   const [bodyRegionTemplates, setBodyRegionTemplates] = useState<BodyRegionDefinition[]>(() =>
     readBodyRegionTemplates()
   );
@@ -276,7 +341,7 @@ export function PrescriptionPanel({
           }
         }
       })
-      .catch(() => {});
+      .catch(() => { });
 
     const handler = (e: any) => {
       if (Array.isArray(e.detail) && e.detail.length > 0) {
@@ -359,15 +424,16 @@ export function PrescriptionPanel({
       const updated = consultation.prescription.map((item) =>
         item.id === editingId
           ? {
-              ...item,
-              medicineName: formState.medicineName.trim(),
-              strength: formState.strength.trim(),
-              dosage: formState.dosage,
-              route: formState.route,
-              frequency: formState.frequency,
-              duration: formState.duration,
-              instructions: formState.instructions.trim(),
-            }
+            ...item,
+            medicineName: formState.medicineName.trim(),
+            strength: formState.strength.trim(),
+            dosage: formState.dosage,
+            route: formState.route,
+            frequency: formState.frequency,
+            duration: formState.duration,
+            instructions: formState.instructions.trim(),
+            appliedAreas: formState.appliedAreas,
+          }
           : item
       );
       onChange({ prescription: updated });
@@ -385,6 +451,7 @@ export function PrescriptionPanel({
         frequency: formState.frequency,
         duration: formState.duration,
         instructions: formState.instructions.trim(),
+        appliedAreas: formState.appliedAreas,
       };
       onChange({ prescription: [...consultation.prescription, newItem] });
       toast.push(`Added ${newItem.medicineName} to prescription.`);
@@ -408,7 +475,11 @@ export function PrescriptionPanel({
       frequency: item.frequency || 'Twice daily',
       duration: item.duration || '5 days',
       instructions: item.instructions || '',
+      appliedAreas: item.appliedAreas || [],
     });
+    if (item.appliedAreas && item.appliedAreas.length > 0) {
+      setShowAreaSectionManual(true);
+    }
     setActiveMode('manual');
     // Scroll smoothly to form
     const formElem = document.getElementById('manual-entry-section');
@@ -420,6 +491,8 @@ export function PrescriptionPanel({
   const handleCancelEdit = () => {
     setEditingId(null);
     setFormState(defaultFormValues);
+    setShowAreaSectionManual(false);
+    setCustomAreaInput('');
   };
 
   const handleRemoveMed = (id: string, name: string) => {
@@ -529,7 +602,7 @@ export function PrescriptionPanel({
         setCameraStream(stream);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => {});
+          videoRef.current.play().catch(() => { });
         }
       } catch (err) {
         if (!active) return;
@@ -577,7 +650,7 @@ export function PrescriptionPanel({
     setCapturedFile(null);
     if (videoRef.current && cameraStream) {
       videoRef.current.srcObject = cameraStream;
-      videoRef.current.play().catch(() => {});
+      videoRef.current.play().catch(() => { });
     }
   };
 
@@ -726,7 +799,7 @@ export function PrescriptionPanel({
           </div>
         </div>
 
-        {/* Card 3: Body Region Templates */}
+        {/* Card 3: Meditation */}
         <div
           role="button"
           tabIndex={0}
@@ -762,7 +835,7 @@ export function PrescriptionPanel({
           </div>
           <div>
             <strong style={{ fontSize: 15, color: '#0F172A', display: 'block', fontWeight: 700 }}>
-              Body Region Templates
+              Meditation
             </strong>
             <span style={{ fontSize: 12.5, color: '#64748B', display: 'block', marginTop: 2 }}>
               Use predefined templates
@@ -906,7 +979,15 @@ export function PrescriptionPanel({
                     id="rx-select-dosage-form"
                     className="control"
                     value={formState.dosage}
-                    onChange={(e) => setFormState({ ...formState, dosage: e.target.value })}
+                    onChange={(e) => {
+                      const newDosage = e.target.value;
+                      const isCreamLike = ['Cream', 'Ointment', 'Gel', 'Lotion', 'Patch'].includes(newDosage);
+                      setFormState({
+                        ...formState,
+                        dosage: newDosage,
+                        route: isCreamLike && formState.route === 'Oral' ? 'Topical' : formState.route,
+                      });
+                    }}
                     style={{
                       height: 42,
                       padding: '0 12px',
@@ -1021,6 +1102,179 @@ export function PrescriptionPanel({
                   </select>
                 </div>
               </div>
+
+              {/* Area to be applied (For Creams / Ointments / Gels / Topical preparations) */}
+              {isCreamOrTopical ? (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: '14px 16px',
+                    background: '#F8FAFC',
+                    border: '1.5px solid #0D9488',
+                    borderRadius: 10,
+                    boxShadow: '0 1px 3px rgba(13, 148, 136, 0.08)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      Area to be applied
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#047857', background: '#DCFCE7', border: '1px solid #86EFAC', padding: '1px 8px', borderRadius: 999 }}>
+                        Select multiple
+                      </span>
+                    </label>
+                    {formState.appliedAreas.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFormState({ ...formState, appliedAreas: [] })}
+                        style={{ fontSize: 11.5, color: '#DC2626', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 500 }}
+                      >
+                        Clear all ({formState.appliedAreas.length})
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Selected tags */}
+                  {formState.appliedAreas.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, padding: '8px 10px', background: '#FFFFFF', border: '1px solid #BBF7D0', borderRadius: 8 }}>
+                      {formState.appliedAreas.map((area) => (
+                        <span
+                          key={area}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            padding: '4px 10px',
+                            background: '#DCFCE7',
+                            border: '1px solid #86EFAC',
+                            color: '#14532D',
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            borderRadius: 999,
+                          }}
+                        >
+                          <span>{area}</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleArea(area)}
+                            style={{
+                              border: 'none',
+                              background: '#86EFAC',
+                              color: '#14532D',
+                              borderRadius: '50%',
+                              width: 16,
+                              height: 16,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              padding: 0,
+                            }}
+                            title={`Remove ${area}`}
+                          >
+                            <X size={11} strokeWidth={2.5} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: '#64748B', fontStyle: 'italic', marginBottom: 10 }}>
+                      No application areas selected yet. Click any popular area below or type a custom area.
+                    </div>
+                  )}
+
+                  {/* Custom area text input */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                    <input
+                      type="text"
+                      className="control"
+                      value={customAreaInput}
+                      onChange={(e) => setCustomAreaInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomArea();
+                        }
+                      }}
+                      placeholder="Type any specific area (e.g. Left cheek, Lower back, Full face...) & press Add or Enter"
+                      style={{ height: 38, fontSize: 13, flex: 1, borderRadius: 6, border: '1px solid #CBD5E1', padding: '0 12px' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomArea}
+                      disabled={!customAreaInput.trim()}
+                      style={{
+                        height: 38,
+                        padding: '0 14px',
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        background: customAreaInput.trim() ? '#0D9488' : '#94A3B8',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        cursor: customAreaInput.trim() ? 'pointer' : 'not-allowed',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <Plus size={14} /> Add area
+                    </button>
+                  </div>
+
+                  {/* Quick select chips */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#475569', alignSelf: 'center', marginRight: 4 }}>
+                      Popular areas:
+                    </span>
+                    {COMMON_APPLICATION_AREAS.map((area) => {
+                      const isSelected = formState.appliedAreas.includes(area);
+                      return (
+                        <button
+                          type="button"
+                          key={area}
+                          onClick={() => toggleArea(area)}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: 16,
+                            fontSize: 12,
+                            fontWeight: isSelected ? 600 : 500,
+                            border: isSelected ? '1.5px solid #059669' : '1px solid #CBD5E1',
+                            background: isSelected ? '#ECFDF5' : '#FFFFFF',
+                            color: isSelected ? '#047857' : '#334155',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          {isSelected ? '✓ ' : ''}{area}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ marginBottom: 14 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowAreaSectionManual(true)}
+                    style={{
+                      background: '#F0FDF4',
+                      border: '1px dashed #059669',
+                      color: '#047857',
+                      borderRadius: 8,
+                      padding: '6px 12px',
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <span>📍</span> + Specify Area to be applied (for Creams / Topicals)
+                  </button>
+                </div>
+              )}
 
               {/* Row 3: Instructions (full width across all columns) */}
               <div style={{ marginBottom: 12 }}>
@@ -1486,7 +1740,7 @@ export function PrescriptionPanel({
                 </div>
                 <div>
                   <strong style={{ fontSize: 16, color: '#0F172A', display: 'block', fontWeight: 700 }}>
-                    Body Region Tablets Template ({activeDef?.region || 'Knee'})
+                    Meditation Tablets ({activeDef?.region || 'Knee'})
                   </strong>
                   <span style={{ fontSize: 12.5, color: '#64748B', display: 'block', marginTop: 2 }}>
                     Pick a body region, review standard tablets, and click Add Selected to load them into the prescription.
@@ -1784,7 +2038,27 @@ export function PrescriptionPanel({
                       {idx + 1}
                     </td>
                     <td style={{ padding: '12px 14px', fontSize: 13.5, color: '#0F172A', fontWeight: 700 }}>
-                      {item.medicineName}
+                      <div>{item.medicineName}</div>
+                      {item.appliedAreas && item.appliedAreas.length > 0 && (
+                        <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: '#047857',
+                              background: '#D1FAE5',
+                              border: '1px solid #A7F3D0',
+                              borderRadius: 4,
+                              padding: '1px 6px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 3,
+                            }}
+                          >
+                            📍 Area: {item.appliedAreas.join(', ')}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '12px 14px', fontSize: 13, color: '#334155' }}>
                       {item.strength || '—'}
@@ -1862,7 +2136,7 @@ export function PrescriptionPanel({
               No medications added yet
             </strong>
             <span style={{ fontSize: 12.5, color: '#64748B', display: 'block', marginTop: 4 }}>
-              Choose Manual Entry, Upload Prescription, or Body Region Templates above to add medicines.
+              Choose Manual Entry, Upload Prescription, or Meditation above to add medicines.
             </span>
           </div>
         )}
@@ -1875,9 +2149,9 @@ export function PrescriptionPanel({
         subtitle={
           previewImage
             ? `${(previewImage.size / 1024).toFixed(0)} KB · Uploaded ${dateLabel(
-                previewImage.uploadedAt,
-                'd MMM yyyy · h:mm a'
-              )}`
+              previewImage.uploadedAt,
+              'd MMM yyyy · h:mm a'
+            )}`
             : undefined
         }
         onClose={() => setPreviewImage(null)}

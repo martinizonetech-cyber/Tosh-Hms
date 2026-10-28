@@ -83,6 +83,10 @@ class RecordRefundRequest(CamelModel):
         return round(v, 2)
 
 
+class UpdateInvoiceRequest(CamelModel):
+    consultation_fee: float | None = Field(None, ge=0)
+
+
 class CreateVisitChargeRequest(CamelModel):
     description: str = Field(..., min_length=1, max_length=255)
     amount: float = Field(..., gt=0)

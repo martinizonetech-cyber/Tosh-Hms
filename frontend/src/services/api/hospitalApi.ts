@@ -12,6 +12,11 @@ const queryString = (params: object) => {
 export interface ApiRepository extends HospitalRepository {
   listVisits(params?: { patientId?: string; department?: string; status?: string; page?: number; pageSize?: number }): Promise<PaginatedResponse<Consultation>>;
   renameDocument(id: string, name: string): Promise<PatientDocument>;
+  addInvoiceCharge(invoiceId: string, input: CreateVisitChargeRequest): Promise<ChargeItem>;
+  deleteInvoiceCharge(invoiceId: string, chargeId: string): Promise<void>;
+  updateInvoiceConsultationFee(invoiceId: string, consultationFee: number): Promise<Invoice>;
+  deletePayment(invoiceId: string, paymentId: string): Promise<void>;
+  updateInvoiceCharge(invoiceId: string, chargeId: string, input: { description: string; amount: number; qty?: number; unitPrice?: number }): Promise<ChargeItem>;
 }
 
 export const hospitalApi: ApiRepository = {
@@ -39,6 +44,25 @@ export const hospitalApi: ApiRepository = {
   getConsultation(visitId: string) { return requestJson<Consultation>(`/visits/${encodeURIComponent(visitId)}/consultation`); },
   saveConsultation(input: SaveConsultationRequest) { return requestJson<Consultation>(`/visits/${encodeURIComponent(input.visitId)}/consultation`, { method: 'PUT', body: JSON.stringify(input) }); },
   addVisitCharge(visitId: string, input: CreateVisitChargeRequest) { return requestJson<ChargeItem>(`/visits/${encodeURIComponent(visitId)}/charges`, { method: 'POST', body: JSON.stringify(input) }); },
+  addInvoiceCharge(invoiceId: string, input: CreateVisitChargeRequest) { return requestJson<ChargeItem>(`/invoices/${encodeURIComponent(invoiceId)}/charges`, { method: 'POST', body: JSON.stringify(input) }); },
+  deleteInvoiceCharge(invoiceId: string, chargeId: string) { return requestJson<void>(`/invoices/${encodeURIComponent(invoiceId)}/charges/${encodeURIComponent(chargeId)}`, { method: 'DELETE' }); },
+  updateInvoiceConsultationFee(invoiceId: string, consultationFee: number) {
+    return requestJson<Invoice>(`/invoices/${encodeURIComponent(invoiceId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ consultationFee }),
+    });
+  },
+  deletePayment(invoiceId: string, paymentId: string) {
+    return requestJson<void>(`/invoices/${encodeURIComponent(invoiceId)}/payments/${encodeURIComponent(paymentId)}`, {
+      method: 'DELETE',
+    });
+  },
+  updateInvoiceCharge(invoiceId: string, chargeId: string, input: { description: string; amount: number; qty?: number; unitPrice?: number }) {
+    return requestJson<ChargeItem>(`/invoices/${encodeURIComponent(invoiceId)}/charges/${encodeURIComponent(chargeId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ description: input.description, amount: input.amount }),
+    });
+  },
   listFollowUps(params: FollowUpSearchParams = {}) { return requestJson<PaginatedResponse<FollowUp>>(`/follow-ups${queryString(params)}`); },
   createFollowUp(input: NewFollowUpInput) { const body: CreateFollowUpRequest = input; return requestJson<FollowUp>('/follow-ups', { method: 'POST', body: JSON.stringify(body) }); },
   updateFollowUp(id: string, patch: UpdateFollowUpRequest) { return requestJson<FollowUp>(`/follow-ups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }); },

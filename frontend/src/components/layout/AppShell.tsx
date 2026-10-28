@@ -34,7 +34,7 @@ const navByRole: Record<PortalRole, NavItem[]> = {
     { label: 'Appointments', to: '/ortho/appointments', icon: CalendarDays },
     { label: 'Patients', to: '/ortho/patients', icon: Users },
     { label: 'Consultation', to: '/ortho/consultation', icon: Stethoscope },
-    { label: 'Body Region Templates', to: '/ortho/templates', icon: Bone },
+    { label: 'Meditation', to: '/ortho/templates', icon: Bone },
     { label: 'Charges', to: '/ortho/charges', icon: CreditCard },
     { label: 'Follow-ups', to: '/ortho/follow-ups', icon: MessageCircle },
     { label: 'Reports', to: '/ortho/reports', icon: FileBarChart2 },

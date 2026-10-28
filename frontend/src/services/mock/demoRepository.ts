@@ -3,7 +3,7 @@ import type { Appointment, Consultation, Department, DemoState, FollowUp, Invoic
 import { DATA_MODE, requireDemoMode } from '../repositories/mode';
 import { createBrowserDemoDocument } from '../documents/browserDocumentService';
 
-const STORAGE_KEY = 'carehub-demo-state-v1';
+const STORAGE_KEY = 'carehub-demo-state-v4';
 const stamp = () => new Date().toISOString();
 const emptyVitals = (): Vitals => ({ bloodPressure: '', pulse: '', temperature: '', height: '', weight: '', oxygenSaturation: '' });
 const emptyState = (): DemoState => ({ patients: [], appointments: [], queue: [], invoices: [], consultations: [], followUps: [], fees: { skin: 700, orthopaedics: 900, currency: 'INR' } });
@@ -26,6 +26,11 @@ function initialState(): DemoState {
         parsed.followUps?.forEach((f) => {
           if (f.doctor === 'Dr. Nisha Kulkarni') f.doctor = 'Dr. Sangamitra';
           if (f.doctor === 'Dr. Raghav Menon') f.doctor = 'Dr. Sundarprakash';
+        });
+        parsed.invoices.forEach((inv) => {
+          if (inv.id === 'INV-3403' && inv.payments.some((p) => p.id === 'PAY-12')) {
+            inv.payments = [];
+          }
         });
         return parsed;
       }
@@ -194,6 +199,124 @@ export class DemoHospitalRepository {
       ? this.state.consultations.map((entry) => entry.id === visit.id ? { ...entry, procedures: [...entry.procedures, charge] } : entry)
       : [{ ...visit, procedures: [charge] }, ...this.state.consultations];
     this.save({ ...this.state, invoices, consultations });
+  }
+
+  addInvoiceCharge(invoiceId: string, description: string, amount: number, addedBy: string = 'Reception Desk', qty: number = 1) {
+    this.requireDemo();
+    if (amount <= 0) throw new Error('Charge must be greater than zero.');
+    const invoice = this.state.invoices.find((entry) => entry.id === invoiceId);
+    if (!invoice) throw new Error('Invoice could not be found.');
+    const unitPrice = qty > 1 ? Math.round(amount / qty) : amount;
+    const charge = { id: `CH-${Date.now()}`, description, amount, addedBy, createdAt: stamp(), qty, unitPrice };
+    const invoices = this.state.invoices.map((entry) =>
+      entry.id === invoice.id ? { ...entry, charges: [...entry.charges, charge] } : entry
+    );
+    let consultations = this.state.consultations;
+    if (invoice.visitId) {
+      consultations = this.state.consultations.map((entry) =>
+        entry.id === invoice.visitId ? { ...entry, procedures: [...entry.procedures, charge] } : entry
+      );
+    }
+    this.save({ ...this.state, invoices, consultations });
+    return charge;
+  }
+
+  removeInvoiceCharge(invoiceId: string, chargeId: string) {
+    this.requireDemo();
+    const invoice = this.state.invoices.find((entry) => entry.id === invoiceId);
+    if (!invoice) throw new Error('Invoice could not be found.');
+    const invoices = this.state.invoices.map((entry) =>
+      entry.id === invoice.id
+        ? { ...entry, charges: entry.charges.filter((c) => c.id !== chargeId) }
+        : entry
+    );
+    let consultations = this.state.consultations;
+    if (invoice.visitId) {
+      consultations = this.state.consultations.map((entry) =>
+        entry.id === invoice.visitId
+          ? { ...entry, procedures: entry.procedures.filter((p) => p.id !== chargeId) }
+          : entry
+      );
+    }
+    this.save({ ...this.state, invoices, consultations });
+  }
+
+  updateInvoiceCharge(
+    invoiceId: string,
+    chargeId: string,
+    patch: { description: string; amount: number; qty?: number; unitPrice?: number }
+  ) {
+    this.requireDemo();
+    if (patch.amount <= 0) throw new Error('Charge must be greater than zero.');
+    const invoice = this.state.invoices.find((entry) => entry.id === invoiceId);
+    if (!invoice) throw new Error('Invoice could not be found.');
+    const qty = patch.qty || 1;
+    const unitPrice = patch.unitPrice ?? (qty > 1 ? Math.round(patch.amount / qty) : patch.amount);
+
+    let updatedCharge: any = null;
+    const invoices = this.state.invoices.map((entry) => {
+      if (entry.id !== invoice.id) return entry;
+      const charges = entry.charges.map((c) => {
+        if (c.id === chargeId) {
+          updatedCharge = {
+            ...c,
+            description: patch.description,
+            amount: patch.amount,
+            qty,
+            unitPrice,
+          };
+          return updatedCharge;
+        }
+        return c;
+      });
+      return { ...entry, charges };
+    });
+
+    let consultations = this.state.consultations;
+    if (invoice.visitId) {
+      consultations = this.state.consultations.map((entry) => {
+        if (entry.id !== invoice.visitId) return entry;
+        const procedures = entry.procedures.map((p) => {
+          if (p.id === chargeId && updatedCharge) {
+            return {
+              ...p,
+              description: patch.description,
+              amount: patch.amount,
+              qty,
+              unitPrice,
+            };
+          }
+          return p;
+        });
+        return { ...entry, procedures };
+      });
+    }
+
+    this.save({ ...this.state, invoices, consultations });
+    return updatedCharge;
+  }
+
+  updateInvoiceConsultationFee(invoiceId: string, consultationFee: number) {
+    this.requireDemo();
+    if (consultationFee < 0) throw new Error('Consultation fee cannot be negative.');
+    const invoice = this.state.invoices.find((entry) => entry.id === invoiceId);
+    if (!invoice) throw new Error('Invoice could not be found.');
+    const invoices = this.state.invoices.map((entry) =>
+      entry.id === invoice.id ? { ...entry, consultationFee } : entry
+    );
+    this.save({ ...this.state, invoices });
+  }
+
+  removePayment(invoiceId: string, paymentId: string) {
+    this.requireDemo();
+    const invoice = this.state.invoices.find((entry) => entry.id === invoiceId);
+    if (!invoice) throw new Error('Invoice could not be found.');
+    const invoices = this.state.invoices.map((entry) =>
+      entry.id === invoice.id
+        ? { ...entry, payments: entry.payments.filter((p) => p.id !== paymentId) }
+        : entry
+    );
+    this.save({ ...this.state, invoices });
   }
 
   recordPayment(invoiceId: string, payment: Omit<Payment, 'id' | 'paidAt'>) {

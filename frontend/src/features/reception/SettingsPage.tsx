@@ -9,11 +9,9 @@ import {
   Phone,
   RotateCcw,
   Save,
-  Settings2,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-import type { Department } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';
 import { useToast } from '../../components/ui/Toast';
 import { money } from '../../utils/format';

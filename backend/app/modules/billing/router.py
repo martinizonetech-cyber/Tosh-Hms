@@ -19,6 +19,7 @@ from app.modules.audit.service import log_audit_event
 from app.modules.auth.dependencies import get_current_user, require_role
 from app.modules.billing.models import Invoice, InvoiceCharge, Payment, Refund
 from app.modules.billing.schemas import (
+    UpdateInvoiceRequest,
     ChargeItemResponse,
     CreateVisitChargeRequest,
     InvoiceResponse,
@@ -394,9 +395,9 @@ async def add_visit_charge(
     if not visit:
         raise NotFoundException(f"Visit with ID {visit_id} not found.")
 
-    # Doctor of that department only
-    if current_user.role != visit.department:
-        raise ForbiddenException("Only the clinician of this department can add charges to this visit.")
+    # Doctor of that department or reception staff
+    if current_user.role != visit.department and current_user.role != "reception":
+        raise ForbiddenException("Only the clinician of this department or reception staff can add charges.")
 
     # Find linked invoice
     inv_stmt = select(Invoice).where(Invoice.visit_id == visit.id).with_for_update(of=Invoice)
@@ -456,6 +457,215 @@ async def add_visit_charge(
         added_by=charge.added_by,
         date=charge.created_at.strftime("%Y-%m-%d"),
     )
+
+@router.post("/invoices/{invoice_id}/charges", response_model=ChargeItemResponse, status_code=status.HTTP_201_CREATED, summary="Add charge directly to invoice")
+async def add_invoice_charge(
+    invoice_id: str,
+    payload: CreateVisitChargeRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_staff),
+) -> ChargeItemResponse:
+    invoice = await find_invoice_by_id(db, invoice_id, for_update=True)
+    if not invoice:
+        raise NotFoundException(f"Invoice with ID {invoice_id} not found.")
+
+    if current_user.role != invoice.department and current_user.role != "reception":
+        raise ForbiddenException("Only the clinician of this department or reception staff can add charges.")
+
+    final_amount = payload.amount
+    description = payload.description
+    if payload.catalog_item_id:
+        conditions = [ChargeCatalogItem.display_id == payload.catalog_item_id]
+        if is_uuid(payload.catalog_item_id):
+            conditions.append(ChargeCatalogItem.id == uuid.UUID(payload.catalog_item_id))
+        cat_stmt = select(ChargeCatalogItem).where(
+            or_(*conditions),
+            ChargeCatalogItem.is_active.is_(True),
+        )
+        cat_res = await db.execute(cat_stmt)
+        cat_item = cat_res.scalar_one_or_none()
+        if cat_item:
+            final_amount = round(cat_item.price / 100.0, 2)
+            if not description or description == payload.catalog_item_id:
+                description = cat_item.name
+
+    display_id = await next_display_id(db, InvoiceCharge, "CHG")
+    charge = InvoiceCharge(
+        display_id=display_id,
+        invoice_id=invoice.id,
+        description=description,
+        amount=round(final_amount * 100),
+        added_by=current_user.display_name,
+    )
+    db.add(charge)
+
+    await log_audit_event(
+        db=db,
+        action="INVOICE_CHARGE_ADD",
+        entity_type="Invoice",
+        entity_id=invoice.display_id,
+        actor_user_id=current_user.id,
+        patient_id=invoice.patient_id,
+        after_state={"chargeId": display_id, "description": description, "amount": final_amount},
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    await db.commit()
+    await db.refresh(charge)
+
+    return ChargeItemResponse(
+        id=charge.display_id,
+        description=charge.description,
+        amount=final_amount,
+        department=invoice.department,
+        added_by=charge.added_by,
+        date=charge.created_at.strftime("%Y-%m-%d"),
+    )
+
+
+
+
+
+@router.patch("/invoices/{invoice_id}", response_model=InvoiceResponse, summary="Update invoice consultation fee")
+async def update_invoice(
+    invoice_id: str,
+    payload: UpdateInvoiceRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_staff),
+):
+    invoice = await find_invoice_by_id(db, invoice_id, for_update=True)
+    if not invoice:
+        raise NotFoundException(f"Invoice with ID {invoice_id} not found.")
+
+    if current_user.role != invoice.department and current_user.role != "reception":
+        raise ForbiddenException("Only the clinician of this department or reception staff can edit invoices.")
+
+    if payload.consultation_fee is not None:
+        if payload.consultation_fee < 0:
+            raise BadRequestException("Consultation fee cannot be negative.")
+        invoice.consultation_fee = int(round(payload.consultation_fee * 100))
+
+    await db.commit()
+    await db.refresh(invoice)
+    return to_invoice_response(invoice)
+
+
+@router.delete("/invoices/{invoice_id}/payments/{payment_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete payment from invoice")
+async def delete_invoice_payment(
+    invoice_id: str,
+    payment_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_staff),
+):
+    invoice = await find_invoice_by_id(db, invoice_id, for_update=True)
+    if not invoice:
+        raise NotFoundException(f"Invoice with ID {invoice_id} not found.")
+
+    if current_user.role != invoice.department and current_user.role != "reception":
+        raise ForbiddenException("Only the clinician of this department or reception staff can delete payments.")
+
+    conditions = [Payment.invoice_id == invoice.id]
+    if is_uuid(payment_id):
+        conditions.append(or_(Payment.id == uuid.UUID(payment_id), Payment.display_id == payment_id))
+    else:
+        conditions.append(Payment.display_id == payment_id)
+
+    stmt = select(Payment).where(*conditions)
+    res = await db.execute(stmt)
+    payment = res.scalar_one_or_none()
+    if not payment:
+        raise NotFoundException(f"Payment {payment_id} not found on invoice.")
+
+    await db.delete(payment)
+    await db.commit()
+
+
+@router.patch("/invoices/{invoice_id}/charges/{charge_id}", response_model=ChargeItemResponse, summary="Update charge on invoice")
+async def update_invoice_charge(
+    invoice_id: str,
+    charge_id: str,
+    payload: CreateVisitChargeRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_staff),
+):
+    invoice = await find_invoice_by_id(db, invoice_id, for_update=True)
+    if not invoice:
+        raise NotFoundException(f"Invoice with ID {invoice_id} not found.")
+
+    if current_user.role != invoice.department and current_user.role != "reception":
+        raise ForbiddenException("Only the clinician of this department or reception staff can edit charges.")
+
+    conditions = [InvoiceCharge.invoice_id == invoice.id]
+    if is_uuid(charge_id):
+        conditions.append(or_(InvoiceCharge.id == uuid.UUID(charge_id), InvoiceCharge.display_id == charge_id))
+    else:
+        conditions.append(InvoiceCharge.display_id == charge_id)
+
+    stmt = select(InvoiceCharge).where(*conditions)
+    res = await db.execute(stmt)
+    charge = res.scalar_one_or_none()
+    if not charge:
+        raise NotFoundException(f"Charge {charge_id} not found on invoice.")
+
+    charge.description = payload.description.strip()
+    charge.amount = int(round(payload.amount * 100))
+    await db.commit()
+    await db.refresh(charge)
+    return serialize_charge(charge)
+
+
+@router.delete("/invoices/{invoice_id}/charges/{charge_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete charge from invoice")
+async def delete_invoice_charge(
+    invoice_id: str,
+    charge_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_staff),
+):
+    invoice = await find_invoice_by_id(db, invoice_id, for_update=True)
+    if not invoice:
+        raise NotFoundException(f"Invoice with ID {invoice_id} not found.")
+
+    if current_user.role != invoice.department and current_user.role != "reception":
+        raise ForbiddenException("Only the clinician of this department or reception staff can delete charges.")
+
+    # Find charge by display_id or id
+    conditions = [InvoiceCharge.invoice_id == invoice.id]
+    if is_uuid(charge_id):
+        conditions.append(or_(InvoiceCharge.id == uuid.UUID(charge_id), InvoiceCharge.display_id == charge_id))
+    else:
+        conditions.append(InvoiceCharge.display_id == charge_id)
+
+    stmt = select(InvoiceCharge).where(*conditions)
+    res = await db.execute(stmt)
+    charge = res.scalar_one_or_none()
+    if not charge:
+        raise NotFoundException(f"Charge {charge_id} not found on invoice.")
+
+    deleted_disp = charge.display_id
+    deleted_amt = charge.amount / 100.0
+
+    await db.delete(charge)
+
+    await log_audit_event(
+        db=db,
+        action="INVOICE_CHARGE_DELETE",
+        entity_type="Invoice",
+        entity_id=invoice.display_id,
+        actor_user_id=current_user.id,
+        patient_id=invoice.patient_id,
+        after_state={"deletedChargeId": deleted_disp, "amount": deleted_amt},
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    await db.commit()
+    return None
 
 
 def is_uuid(val: str) -> bool:

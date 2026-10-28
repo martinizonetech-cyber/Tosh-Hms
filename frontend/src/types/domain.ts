@@ -64,6 +64,8 @@ export interface ChargeItem {
   amount: number;
   addedBy: string;
   createdAt: string;
+  qty?: number;
+  unitPrice?: number;
 }
 
 export interface Payment {
@@ -108,6 +110,7 @@ export interface PrescriptionItem {
   frequency: string;
   duration: string;
   instructions: string;
+  appliedAreas?: string[];
 }
 
 export interface PrescriptionImage {

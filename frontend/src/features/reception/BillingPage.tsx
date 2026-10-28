@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { CreditCard, FileText, Printer, Search, Wallet } from 'lucide-react';
+import { CreditCard, Edit2, FileText, Plus, Printer, Search, Trash2, Wallet } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { paymentSchema } from '../../schemas/forms';
@@ -52,33 +52,43 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
   const { state, repository } = useHospitalData();
   const toast = useToast();
   const [viewMode, setViewMode] = useState<'invoice' | 'receipt'>('invoice');
-  const patient = invoice ? state.patients.find((person) => person.id === invoice.patientId) : undefined;
-  const totals = invoice ? patientInvoiceTotals(invoice) : null;
+  const [showAddChargeModal, setShowAddChargeModal] = useState(false);
+  const [editingCharge, setEditingCharge] = useState<any | null>(null);
+  // Ensure we always reference the live invoice in state so newly added charges/payments reflect instantly
+  const currentInvoice = invoice ? (state.invoices.find((i) => i.id === invoice.id) ?? invoice) : null;
+  const patient = currentInvoice ? state.patients.find((person) => person.id === currentInvoice.patientId) : undefined;
+  const totals = currentInvoice ? patientInvoiceTotals(currentInvoice) : null;
   const { register, handleSubmit, formState: { errors }, reset } = useForm({
     resolver: zodResolver(paymentSchema),
     defaultValues: { amount: totals?.balance ?? 0, method: 'Cash' as Payment['method'], transactionReference: '' },
   });
 
+  useEffect(() => {
+    if (totals?.balance !== undefined) {
+      reset({ amount: totals.balance, method: 'Cash', transactionReference: '' });
+    }
+  }, [totals?.balance, reset]);
+
   const refreshForm = () => reset({ amount: totals?.balance ?? 0, method: 'Cash', transactionReference: '' });
 
   const pay = handleSubmit(async (values) => {
-    if (!invoice) return;
+    if (!currentInvoice) return;
     try {
-      await repository.recordPayment(invoice.id, {
+      await repository.recordPayment(currentInvoice.id, {
         ...values,
         amount: Number(values.amount),
         transactionReference: values.transactionReference || undefined,
       });
-      toast.push('Payment recorded; invoice balance updated.');
+      toast.push(`Payment of ${money(Number(values.amount))} recorded; invoice balance updated.`);
       refreshForm();
-      setViewMode('receipt');
+      setViewMode('invoice');
     } catch (error) {
       toast.push(error instanceof Error ? error.message : 'Could not record payment.', 'error');
     }
   });
 
   const print = (kind: 'invoice' | 'receipt') => {
-    if (kind === 'receipt' && !invoice?.payments.length) {
+    if (kind === 'receipt' && !currentInvoice?.payments.length) {
       toast.push('Record a payment before printing a receipt.', 'error');
       return;
     }
@@ -92,14 +102,42 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
     }, 100);
   };
 
-  if (!invoice || !totals) return null;
-  const latestPayment = invoice.payments[invoice.payments.length - 1];
+  if (!currentInvoice || !totals) return null;
+  const latestPayment = currentInvoice.payments[currentInvoice.payments.length - 1];
+
+  const handleDeleteCharge = async (chargeId: string, description: string) => {
+    if (!currentInvoice) return;
+    if (!window.confirm(`Delete charge "${description}" from invoice ${currentInvoice.id}?`)) return;
+    try {
+      await (repository as any).removeInvoiceCharge(currentInvoice.id, chargeId);
+      toast.push(`Deleted "${description}" from invoice.`);
+    } catch (err) {
+      toast.push(err instanceof Error ? err.message : 'Could not delete charge.', 'error');
+    }
+  };
+
+  const handleDeletePayment = async (paymentId: string, amount: number) => {
+    if (!currentInvoice) return;
+    if (!window.confirm(`Remove / void payment of ${money(amount)} from invoice ${currentInvoice.id}? This will restore the balance due to ${money(totals.total)} so reception can collect or adjust the amount.`)) return;
+    try {
+      if ((repository as any).removePayment) {
+        await (repository as any).removePayment(currentInvoice.id, paymentId);
+      } else {
+        toast.push('Remove payment method not available.', 'error');
+        return;
+      }
+      toast.push(`Payment of ${money(amount)} removed; balance due restored.`);
+      refreshForm();
+    } catch (err) {
+      toast.push(err instanceof Error ? err.message : 'Could not remove payment.', 'error');
+    }
+  };
 
   return (
     <Modal
       open
-      title={`Invoice ${invoice.id}`}
-      subtitle={`${patient?.fullName ?? 'Patient'} · ${dateLabel(invoice.date)}`}
+      title={`Invoice ${currentInvoice.id}`}
+      subtitle={`${patient?.fullName ?? 'Patient'} · ${dateLabel(currentInvoice.date)}`}
       onClose={onClose}
       wide
       footer={
@@ -114,9 +152,9 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
           <Button
             variant={viewMode === 'receipt' ? 'primary' : 'secondary'}
             onClick={() => print('receipt')}
-            disabled={!invoice.payments.length}
+            disabled={!currentInvoice.payments.length}
             icon={<Printer size={14} />}
-            title={!invoice.payments.length ? 'Record a payment first' : undefined}
+            title={!currentInvoice.payments.length ? 'Record a payment first' : undefined}
           >
             Print receipt
           </Button>
@@ -144,12 +182,12 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
                   transition: 'all 0.15s ease',
                 }}
               >
-                Tax Invoice ({invoice.id})
+                Tax Invoice ({currentInvoice.id})
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  if (!invoice.payments.length) {
+                  if (!currentInvoice.payments.length) {
                     toast.push('No payments recorded on this invoice yet.', 'info');
                     return;
                   }
@@ -161,15 +199,15 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
                   border: 'none',
                   fontSize: '12px',
                   fontWeight: 600,
-                  cursor: invoice.payments.length ? 'pointer' : 'not-allowed',
-                  opacity: invoice.payments.length ? 1 : 0.6,
+                  cursor: currentInvoice.payments.length ? 'pointer' : 'not-allowed',
+                  opacity: currentInvoice.payments.length ? 1 : 0.6,
                   background: viewMode === 'receipt' ? '#FFFFFF' : 'transparent',
                   color: viewMode === 'receipt' ? 'var(--navy)' : '#64748B',
                   boxShadow: viewMode === 'receipt' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                   transition: 'all 0.15s ease',
                 }}
               >
-                Payment Receipt {invoice.payments.length ? `(${invoice.payments.length})` : '(0)'}
+                Payment Receipt {currentInvoice.payments.length ? `(${currentInvoice.payments.length})` : '(0)'}
               </button>
             </div>
             <span style={{ fontSize: '11px', color: '#64748B' }}>
@@ -178,11 +216,14 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
           </div>
 
           <InvoicePreview
-            invoice={invoice}
+            invoice={currentInvoice}
             patient={patient}
             totals={totals}
             mode={viewMode}
             latestPayment={latestPayment}
+            onOpenAddPayment={() => setShowAddChargeModal(true)}
+            onDeleteCharge={handleDeleteCharge}
+            onEditCharge={(charge) => setEditingCharge(charge)}
           />
         </div>
 
@@ -219,18 +260,37 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
                 placeholder="UPI ref / Cheque / Card txn"
                 {...register('transactionReference')}
               />
-              <div className="button-row">
-                <Button
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '6px' }}>
+                <button
                   type="button"
-                  variant="secondary"
-                  size="small"
                   onClick={() => reset({ amount: totals.balance, method: 'Cash', transactionReference: '' })}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#0D9488',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: 0,
+                    textDecoration: 'underline',
+                  }}
+                  title="Auto-fill with total remaining balance"
                 >
-                  Set full balance
-                </Button>
-                <Button type="submit" size="small">
-                  Record payment
-                </Button>
+                  Full balance ({money(totals.balance)})
+                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="small"
+                    onClick={() => reset({ amount: totals.balance, method: 'Cash', transactionReference: '' })}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" size="small" variant="primary">
+                    Submit Payment
+                  </Button>
+                </div>
               </div>
             </form>
           ) : (
@@ -239,9 +299,9 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
           <hr className="divider" />
           <div className="payment-history">
             <strong>Payment history</strong>
-            {invoice.payments.length ? (
-              invoice.payments.map((payment) => (
-                <div className="list-row" key={payment.id}>
+            {currentInvoice.payments.length ? (
+              currentInvoice.payments.map((payment) => (
+                <div className="list-row" key={payment.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div className="list-row-main">
                     <strong>{money(payment.amount)} · {payment.method}</strong>
                     <span>
@@ -249,6 +309,28 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
                       {payment.transactionReference ? ` · ${payment.transactionReference}` : ''}
                     </span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePayment(payment.id, payment.amount)}
+                    title={`Remove / void payment of ${money(payment.amount)}`}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#EF4444',
+                      cursor: 'pointer',
+                      padding: '4px 6px',
+                      borderRadius: '4px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'background 0.15s ease',
+                      marginLeft: '8px',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#FEE2E2')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               ))
             ) : (
@@ -257,6 +339,22 @@ function InvoiceModal({ invoice, onClose }: { invoice: Invoice | null; onClose: 
           </div>
         </div>
       </div>
+      {showAddChargeModal && (
+        <AddPaymentModal
+          invoice={currentInvoice}
+          patient={patient}
+          onClose={() => setShowAddChargeModal(false)}
+          onSuccess={() => {}}
+        />
+      )}
+      {editingCharge && (
+        <EditChargeModal
+          invoice={currentInvoice}
+          charge={editingCharge}
+          onClose={() => setEditingCharge(null)}
+          onSuccess={() => setEditingCharge(null)}
+        />
+      )}
     </Modal>
   );
 }
@@ -267,12 +365,18 @@ function InvoicePreview({
   totals,
   mode,
   latestPayment,
+  onOpenAddPayment,
+  onDeleteCharge,
+  onEditCharge,
 }: {
   invoice: Invoice;
   patient?: { fullName: string; id: string; phone: string; address: string };
   totals: ReturnType<typeof patientInvoiceTotals>;
   mode: 'invoice' | 'receipt';
   latestPayment?: Payment;
+  onOpenAddPayment?: () => void;
+  onDeleteCharge?: (chargeId: string, description: string) => void;
+  onEditCharge?: (charge: any) => void;
 }) {
   const receipt = mode === 'receipt';
 
@@ -311,13 +415,57 @@ function InvoicePreview({
 
       {!receipt ? (
         <>
+          {/* Top Bar above Table with Add Payment button aligned to Amount column */}
+          <div
+            className="no-print"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '8px',
+              padding: '6px 12px',
+              background: '#F8FAFC',
+              border: '1px solid #E2E8F0',
+              borderRadius: '6px',
+            }}
+          >
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>
+              Invoice Items &amp; Services
+            </span>
+            {onOpenAddPayment && (
+              <button
+                type="button"
+                onClick={onOpenAddPayment}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '4px 12px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  borderRadius: '6px',
+                  background: '#0D9488',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 2px rgba(13, 148, 136, 0.2)',
+                  transition: 'all 0.15s ease',
+                }}
+                title="Add service description, quantity and payment amount to this invoice"
+              >
+                <Plus size={13} strokeWidth={2.5} /> Add Payment
+              </button>
+            )}
+          </div>
+
           <table className="invoice-table">
             <thead>
               <tr>
-                <th style={{ width: '8%' }}>#</th>
+                <th style={{ width: '7%' }}>#</th>
                 <th>Service Description</th>
                 <th style={{ width: '12%', textAlign: 'center' }}>Qty</th>
-                <th style={{ width: '22%' }}>Amount</th>
+                <th style={{ width: '20%' }}>Amount</th>
+                <th className="no-print" style={{ width: '9%', textAlign: 'center' }}>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -329,18 +477,88 @@ function InvoicePreview({
                 </td>
                 <td style={{ textAlign: 'center' }}>1</td>
                 <td>{money(invoice.consultationFee)}</td>
+                <td className="no-print" style={{ textAlign: 'center', color: '#94A3B8', fontSize: '11px' }} title="Doctor OPD Consultation fee (cannot be edited or deleted by reception)">—</td>
               </tr>
-              {invoice.charges.map((charge, idx) => (
-                <tr key={charge.id}>
-                  <td>{idx + 2}</td>
-                  <td>
-                    <strong>{charge.description}</strong>
-                    <small style={{ display: 'block' }}>Clinical Charge · Added by {charge.addedBy}</small>
-                  </td>
-                  <td style={{ textAlign: 'center' }}>1</td>
-                  <td>{money(charge.amount)}</td>
-                </tr>
-              ))}
+              {invoice.charges.map((charge, idx) => {
+                const isReceptionCharge =
+                  charge.addedBy === 'Reception Desk' ||
+                  charge.addedBy === 'reception' ||
+                  (!charge.addedBy.startsWith('Dr.') && !charge.addedBy.includes('Doctor'));
+
+                return (
+                  <tr key={charge.id}>
+                    <td>{idx + 2}</td>
+                    <td>
+                      <strong>{charge.description}</strong>
+                      <small style={{ display: 'block' }}>
+                        Clinical Charge · Added by {charge.addedBy}
+                        {charge.qty && charge.qty > 1 ? ` (${charge.qty} × ${money(charge.unitPrice || (charge.amount / charge.qty))})` : ''}
+                      </small>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>{charge.qty || 1}</td>
+                    <td>{money(charge.amount)}</td>
+                    <td className="no-print" style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                      {isReceptionCharge ? (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          {onEditCharge && (
+                            <button
+                              type="button"
+                              onClick={() => onEditCharge(charge)}
+                              title={`Edit ${charge.description}`}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#0284C7',
+                                cursor: 'pointer',
+                                padding: '4px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                transition: 'background 0.15s ease',
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = '#E0F2FE')}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                          )}
+                          {onDeleteCharge && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteCharge(charge.id, charge.description)}
+                              title={`Delete ${charge.description}`}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#EF4444',
+                                cursor: 'pointer',
+                                padding: '4px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                transition: 'background 0.15s ease',
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = '#FEE2E2')}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <span
+                          title={`Added by ${charge.addedBy} (Doctor-ordered item cannot be edited or deleted by reception)`}
+                          style={{ color: '#94A3B8', fontSize: '11px', cursor: 'default' }}
+                        >
+                          —
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 
@@ -455,5 +673,415 @@ function InvoicePreview({
         </div>
       </div>
     </article>
+  );
+}
+
+
+function EditChargeModal({
+  invoice,
+  charge,
+  onClose,
+  onSuccess,
+}: {
+  invoice: Invoice;
+  charge: any;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { repository } = useHospitalData();
+  const toast = useToast();
+  const initialQty = charge.qty || 1;
+  const initialUnitAmount = charge.unitPrice || Math.round(charge.amount / initialQty);
+
+  const [description, setDescription] = useState(charge.description);
+  const [qty, setQty] = useState<number>(initialQty);
+  const [unitAmount, setUnitAmount] = useState<number | ''>(initialUnitAmount);
+  const [submitting, setSubmitting] = useState(false);
+
+  const totalAmount = qty * (typeof unitAmount === 'number' ? unitAmount : 0);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!description.trim() || typeof unitAmount !== 'number' || unitAmount <= 0) {
+      toast.push('Please enter a valid description and amount.', 'error');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      if ((repository as any).updateInvoiceCharge) {
+        await (repository as any).updateInvoiceCharge(invoice.id, charge.id, {
+          description: description.trim(),
+          amount: totalAmount,
+          qty,
+          unitPrice: unitAmount,
+        });
+      } else {
+        await (repository as any).removeInvoiceCharge(invoice.id, charge.id);
+        await (repository as any).addInvoiceCharge(
+          invoice.id,
+          description.trim(),
+          totalAmount,
+          charge.addedBy || 'Reception Desk',
+          qty
+        );
+      }
+      toast.push(`Updated "${description.trim()}" successfully.`);
+      onSuccess();
+      onClose();
+    } catch (err) {
+      toast.push(err instanceof Error ? err.message : 'Could not update charge.', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      title="Edit Service Charge"
+      subtitle={`Invoice ${invoice.id} · Charge ${charge.id}`}
+      onClose={onClose}
+    >
+      <form onSubmit={handleSubmit} className="stack" style={{ gap: '16px' }}>
+        <div className="field">
+          <label htmlFor="edit-charge-desc" style={{ fontSize: '13px', fontWeight: 600 }}>
+            Service Description <span style={{ color: '#EF4444' }}>*</span>
+          </label>
+          <input
+            id="edit-charge-desc"
+            type="text"
+            className="control"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. Dressing & Bandage"
+            required
+            autoFocus
+          />
+        </div>
+
+        <div className="form-grid two">
+          <div className="field">
+            <label htmlFor="edit-charge-qty" style={{ fontSize: '13px', fontWeight: 600 }}>
+              Quantity (Qty) <span style={{ color: '#EF4444' }}>*</span>
+            </label>
+            <input
+              id="edit-charge-qty"
+              type="number"
+              className="control"
+              min="1"
+              step="1"
+              value={qty}
+              onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))}
+              required
+            />
+          </div>
+
+          <div className="field">
+            <label htmlFor="edit-charge-unit" style={{ fontSize: '13px', fontWeight: 600 }}>
+              Unit Amount (₹) <span style={{ color: '#EF4444' }}>*</span>
+            </label>
+            <input
+              id="edit-charge-unit"
+              type="number"
+              className="control"
+              min="1"
+              step="1"
+              value={unitAmount}
+              onChange={(e) =>
+                setUnitAmount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))
+              }
+              required
+            />
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '10px 14px',
+            background: '#F8FAFC',
+            border: '1px solid #E2E8F0',
+            borderRadius: '6px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <span style={{ fontSize: '13px', color: '#475569' }}>
+            Calculated Total ({qty} × {money(typeof unitAmount === 'number' ? unitAmount : 0)}):
+          </span>
+          <strong style={{ fontSize: '16px', color: '#0D9488' }}>{money(totalAmount)}</strong>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={submitting || !description.trim() || totalAmount <= 0}>
+            {submitting ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AddPaymentModal({
+  invoice,
+  patient,
+  onClose,
+  onSuccess,
+}: {
+  invoice: Invoice;
+  patient?: { fullName: string; id: string; phone: string; address: string };
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { repository } = useHospitalData();
+  const toast = useToast();
+
+  interface LineItemRow {
+    id: string;
+    description: string;
+    qty: number;
+    unitAmount: number | '';
+  }
+
+  const [items, setItems] = useState<LineItemRow[]>([
+    { id: '1', description: '', qty: 1, unitAmount: '' },
+  ]);
+  const [submitting, setSubmitting] = useState(false);
+
+  const updateItem = (id: string, patch: Partial<LineItemRow>) => {
+    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  };
+
+  const addItemRow = () => {
+    setItems((prev) => [
+      ...prev,
+      { id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, description: '', qty: 1, unitAmount: '' },
+    ]);
+  };
+
+  const removeItemRow = (id: string) => {
+    if (items.length <= 1) {
+      setItems([{ id: '1', description: '', qty: 1, unitAmount: '' }]);
+      return;
+    }
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const grandTotal = items.reduce((sum, item) => {
+    const amt = typeof item.unitAmount === 'number' ? item.unitAmount : 0;
+    return sum + (item.qty * amt);
+  }, 0);
+
+  const validItems = items.filter(
+    (item) => item.description.trim() && typeof item.unitAmount === 'number' && item.unitAmount > 0
+  );
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (validItems.length === 0) {
+      toast.push('Please enter at least one valid item with description and amount.', 'error');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      for (const it of validItems) {
+        const lineTotal = it.qty * Number(it.unitAmount);
+        await (repository as any).addInvoiceCharge(
+          invoice.id,
+          it.description.trim(),
+          lineTotal,
+          'Reception Desk',
+          it.qty,
+        );
+      }
+
+      toast.push(`Added ${validItems.length} item${validItems.length === 1 ? '' : 's'} (${money(grandTotal)}) to invoice.`);
+      onSuccess();
+      onClose();
+    } catch (err) {
+      toast.push(err instanceof Error ? err.message : 'Could not add payment items.', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      title="Add Payment & Service Charges"
+      subtitle={`Invoice ${invoice.id} · ${patient?.fullName ?? 'Patient'} (UHID: ${patient?.id ?? invoice.patientId})`}
+      onClose={onClose}
+      wide
+    >
+      <form onSubmit={handleSubmit} className="stack" style={{ gap: '16px' }}>
+        {/* Compact Table for Multiple Item Entry */}
+        <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden', background: '#FFFFFF' }}>
+          <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+            <table className="data-table" style={{ margin: 0, width: '100%', fontSize: '13px' }}>
+              <thead style={{ position: 'sticky', top: 0, background: '#F8FAFC', zIndex: 1, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                <tr>
+                  <th style={{ width: '40px', textAlign: 'center', padding: '10px 6px' }}>#</th>
+                  <th style={{ minWidth: '220px', padding: '10px 10px' }}>Service Description <span style={{ color: '#EF4444' }}>*</span></th>
+                  <th style={{ width: '85px', textAlign: 'center', padding: '10px 6px' }}>Qty <span style={{ color: '#EF4444' }}>*</span></th>
+                  <th style={{ width: '130px', padding: '10px 8px' }}>Unit Amount (₹) <span style={{ color: '#EF4444' }}>*</span></th>
+                  <th style={{ width: '100px', textAlign: 'right', padding: '10px 10px' }}>Subtotal</th>
+                  <th style={{ width: '45px', textAlign: 'center', padding: '10px 6px' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, idx) => {
+                  const lineTotal = item.qty * (typeof item.unitAmount === 'number' ? item.unitAmount : 0);
+                  return (
+                    <tr key={item.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                      <td style={{ textAlign: 'center', color: '#64748B', fontWeight: 600, padding: '8px 6px' }}>
+                        {idx + 1}
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <input
+                          type="text"
+                          className="control"
+                          value={item.description}
+                          onChange={(e) => updateItem(item.id, { description: e.target.value })}
+                          placeholder="e.g. Dressing, Kenacort..."
+                          required
+                          style={{ height: '36px', fontSize: '13px', width: '100%', borderRadius: '6px' }}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 6px', textAlign: 'center' }}>
+                        <input
+                          type="number"
+                          className="control"
+                          min="1"
+                          step="1"
+                          value={item.qty}
+                          onChange={(e) => updateItem(item.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
+                          required
+                          style={{ height: '36px', fontSize: '13px', textAlign: 'center', width: '100%', borderRadius: '6px' }}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <input
+                          type="number"
+                          className="control"
+                          min="1"
+                          step="1"
+                          placeholder="500"
+                          value={item.unitAmount}
+                          onChange={(e) =>
+                            updateItem(item.id, {
+                              unitAmount: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0),
+                            })
+                          }
+                          required
+                          style={{ height: '36px', fontSize: '13px', width: '100%', borderRadius: '6px' }}
+                        />
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: '#0F172A', padding: '8px 10px', whiteSpace: 'nowrap' }}>
+                        {money(lineTotal)}
+                      </td>
+                      <td style={{ textAlign: 'center', padding: '6px' }}>
+                        <button
+                          type="button"
+                          onClick={() => removeItemRow(item.id)}
+                          title={items.length > 1 ? 'Delete this row' : 'Clear row'}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: items.length > 1 ? '#EF4444' : '#94A3B8',
+                            cursor: 'pointer',
+                            padding: '4px',
+                            borderRadius: '4px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (items.length > 1) e.currentTarget.style.background = '#FEE2E2';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Add Another Item Button Bar inside table container */}
+          <div style={{ padding: '8px 12px', background: '#F8FAFC', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={addItemRow}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '5px 12px',
+                fontSize: '12px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                background: '#F0FDFA',
+                color: '#0D9488',
+                border: '1px solid #99F6E4',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Plus size={14} /> + Add Row
+            </button>
+            <span style={{ fontSize: '12px', color: '#64748B' }}>
+              {validItems.length} of {items.length} row{items.length === 1 ? '' : 's'} filled
+            </span>
+          </div>
+        </div>
+
+        {/* Grand Total Summary Box */}
+        <div
+          style={{
+            padding: '12px 16px',
+            background: '#F1F5F9',
+            border: '1px solid #CBD5E1',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <span style={{ fontSize: '12px', color: '#475569', display: 'block' }}>Summary</span>
+            <strong style={{ fontSize: '13.5px', color: '#0F172A' }}>
+              {validItems.length} valid item{validItems.length === 1 ? '' : 's'} to add
+            </strong>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ fontSize: '12px', color: '#475569', display: 'block' }}>Total Amount to Add</span>
+            <strong style={{ fontSize: '18px', color: '#0D9488' }}>{money(grandTotal)}</strong>
+          </div>
+        </div>
+
+        {/* Modal Action Buttons */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={submitting || validItems.length === 0 || grandTotal <= 0}>
+            {submitting
+              ? 'Adding Items...'
+              : `Add ${validItems.length} Item${validItems.length === 1 ? '' : 's'} (${money(grandTotal)}) to Invoice`}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

@@ -17,6 +17,12 @@ export interface HospitalRepository {
   getConsultation(visitId: string): Promise<Consultation>;
   saveConsultation(input: SaveConsultationRequest): Promise<Consultation>;
   addVisitCharge(visitId: string, input: CreateVisitChargeRequest): Promise<ChargeItem>;
+  addInvoiceCharge?(invoiceId: string, input: CreateVisitChargeRequest): Promise<ChargeItem>;
+  removeInvoiceCharge?(invoiceId: string, chargeId: string): Promise<void>;
+  updateInvoiceConsultationFee?(invoiceId: string, consultationFee: number): Promise<Invoice | void>;
+  deletePayment?(invoiceId: string, paymentId: string): Promise<void>;
+  removePayment?(invoiceId: string, paymentId: string): Promise<void>;
+  updateInvoiceCharge?(invoiceId: string, chargeId: string, patch: { description: string; amount: number; qty?: number; unitPrice?: number }): Promise<ChargeItem>;
   listFollowUps(params?: FollowUpSearchParams): Promise<PaginatedResponse<FollowUp>>;
   createFollowUp(input: NewFollowUpInput): Promise<FollowUp>;
   updateFollowUp(id: string, patch: UpdateFollowUpRequest): Promise<FollowUp>;

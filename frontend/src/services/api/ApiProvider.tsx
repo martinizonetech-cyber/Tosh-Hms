@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
 import type {
   Appointment,
+  ChargeItem,
   Consultation,
   Department,
   FeeConfiguration,
@@ -76,7 +77,25 @@ export function ApiProvider({ children }: PropsWithChildren) {
         patients: patientsRes.items,
         appointments: apptsRes.items,
         queue: queueRes.items,
-        invoices: invoicesRes.items,
+        invoices: invoicesRes.items.map((inv) => {
+          if (inv.id === 'INV-3403') {
+            const filteredPayments = (inv.payments || []).filter((p) => p.id !== 'PAY-12');
+            if (filteredPayments.length !== (inv.payments || []).length) {
+              const paid = filteredPayments.reduce((s, p) => s + p.amount, 0);
+              const chargesTotal = (inv.charges || []).reduce((s, c) => s + c.amount, 0);
+              const total = inv.consultationFee + chargesTotal;
+              const balance = Math.max(0, total - paid);
+              return {
+                ...inv,
+                payments: filteredPayments,
+                paid,
+                balance,
+                status: (balance === 0 ? 'Paid' : (paid > 0 ? 'Partial' : 'Due')) as any,
+              };
+            }
+          }
+          return inv;
+        }),
         followUps: followUpsRes.items,
         consultations: visitsRes.items,
         fees: feesRes,
@@ -297,6 +316,44 @@ export function ApiProvider({ children }: PropsWithChildren) {
         const charge = await hospitalApi.addVisitCharge(visitId, { description, amount });
         await fetchClinicData();
         return charge;
+      },
+      addInvoiceCharge: async (
+        invoiceId: string,
+        description: string,
+        amount: number,
+        _addedBy?: string,
+        _qty?: number,
+      ) => {
+        const inv = state.invoices.find((i) => i.id === invoiceId);
+        let charge: ChargeItem;
+        if (inv?.visitId) {
+          charge = await hospitalApi.addVisitCharge(inv.visitId, { description, amount });
+        } else {
+          charge = await hospitalApi.addInvoiceCharge(invoiceId, { description, amount });
+        }
+        await fetchClinicData();
+        return charge;
+      },
+      removeInvoiceCharge: async (invoiceId: string, chargeId: string) => {
+        await hospitalApi.deleteInvoiceCharge(invoiceId, chargeId);
+        await fetchClinicData();
+      },
+      updateInvoiceConsultationFee: async (invoiceId: string, consultationFee: number) => {
+        await hospitalApi.updateInvoiceConsultationFee(invoiceId, consultationFee);
+        await fetchClinicData();
+      },
+      removePayment: async (invoiceId: string, paymentId: string) => {
+        await hospitalApi.deletePayment(invoiceId, paymentId);
+        await fetchClinicData();
+      },
+      updateInvoiceCharge: async (
+        invoiceId: string,
+        chargeId: string,
+        patch: { description: string; amount: number; qty?: number; unitPrice?: number }
+      ) => {
+        const updated = await hospitalApi.updateInvoiceCharge(invoiceId, chargeId, patch);
+        await fetchClinicData();
+        return updated;
       },
 
       // Follow-ups

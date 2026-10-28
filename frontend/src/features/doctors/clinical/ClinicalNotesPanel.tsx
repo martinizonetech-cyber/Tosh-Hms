@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Calendar,
@@ -13,18 +13,32 @@ import {
   FileText,
   Image as ImageIcon,
   Pill,
+  Plus,
   Stethoscope,
   Activity,
+  X,
 } from 'lucide-react';
 import type { Consultation, Department, PrescriptionItem } from '../../../types/domain';
 import { Card, SectionHeading } from '../../../components/ui/Card';
-import { TextAreaField } from '../../../components/ui/Field';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Modal } from '../../../components/ui/Modal';
 import { dateLabel, departmentLabel, downloadFile, resolveDocumentUrl, resolveInlineDocumentUrl } from '../../../utils/format';
 import { readBodyRegionTemplates } from './bodyRegionTemplates';
+
+/** Parse the stored diagnosis string (newline-separated) into an array of tags */
+function parseDiagnosisTags(raw: string): string[] {
+  return raw
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Serialize tags back to newline-separated string */
+function serializeDiagnosisTags(tags: string[]): string {
+  return tags.join('\n');
+}
 
 interface ClinicalNotesPanelProps {
   department: Department;
@@ -42,7 +56,6 @@ export function ClinicalNotesPanel({
   onCopyPrescription,
 }: ClinicalNotesPanelProps) {
   const [expandedVisits, setExpandedVisits] = useState<Record<string, boolean>>(() => {
-    // Expand the most recent previous visit by default if available
     if (previousVisits.length > 0) {
       return { [previousVisits[0].id]: true };
     }
@@ -51,6 +64,11 @@ export function ClinicalNotesPanel({
 
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   const [copiedItemIds, setCopiedItemIds] = useState<Record<string, boolean>>({});
+
+  // Diagnosis tag input state
+  const [diagInput, setDiagInput] = useState('');
+  const diagInputRef = useRef<HTMLInputElement>(null);
+  const diagTags = parseDiagnosisTags(consultation.diagnosis ?? '');
 
   const regionOptions = useMemo(() => {
     const configured = readBodyRegionTemplates().map((t) => t.region);
@@ -76,22 +94,54 @@ export function ClinicalNotesPanel({
     onCopyPrescription(items);
   };
 
+  // Diagnosis tag handlers
+  const addDiagTag = () => {
+    const val = diagInput.trim();
+    if (!val) return;
+    if (diagTags.includes(val)) {
+      setDiagInput('');
+      return;
+    }
+    const updated = [...diagTags, val];
+    onChange({ diagnosis: serializeDiagnosisTags(updated) });
+    setDiagInput('');
+    diagInputRef.current?.focus();
+  };
+
+  const removeDiagTag = (tag: string) => {
+    const updated = diagTags.filter((t) => t !== tag);
+    onChange({ diagnosis: serializeDiagnosisTags(updated) });
+  };
+
+  const handleDiagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addDiagTag();
+    } else if (e.key === 'Backspace' && diagInput === '' && diagTags.length > 0) {
+      removeDiagTag(diagTags[diagTags.length - 1]);
+    }
+  };
+
+  const isLocked = consultation.status === 'Finalized';
+
   return (
     <div className="stack" style={{ gap: '18px' }}>
-      {/* 1. Current Visit Note: ONLY Symptoms to note the patient problem */}
+
+      {/* ── 1. Chief Complaints / Reason for visit ── */}
       <Card>
         <SectionHeading
-          title="Current Consultation · Symptoms & Patient Problem"
-          subtitle="Document the patient’s presenting complaints and chief problem for this visit."
+          title="Chief Complaints / Reason for visit"
+          subtitle="Document the patient's presenting complaints and chief problem for this visit."
         />
-        <div style={{ marginTop: '8px' }}>
-          <TextAreaField
-            id="clinical-symptoms"
-            label="Symptoms / Reason for visit"
+        <div style={{ marginTop: '12px' }}>
+          <textarea
+            id="clinical-chief-complaints"
+            className="control textarea"
             value={consultation.symptoms}
             onChange={(event) => onChange({ symptoms: event.target.value })}
-            placeholder="Doctor-entered symptoms, chief complaint, duration, and patient's presenting problem..."
+            placeholder="Enter the patient's chief complaints, duration, and presenting problems..."
             rows={4}
+            style={{ width: '100%', minHeight: 96 }}
           />
         </div>
 
@@ -132,7 +182,7 @@ export function ClinicalNotesPanel({
         )}
       </Card>
 
-      {/* 2. Patient Clinical History: Previous Visits */}
+      {/* ── 2. Patient Clinical History & Previous Visits ── */}
       <Card>
         <SectionHeading
           title="Patient Clinical History & Previous Visits"
@@ -283,10 +333,10 @@ export function ClinicalNotesPanel({
                         <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '8px', padding: '12px 14px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#92400E', marginBottom: '6px' }}>
                             <AlertCircle size={14} />
-                            <span>Previous Symptoms / Complaints</span>
+                            <span>Previous Chief Complaints</span>
                           </div>
                           <p style={{ margin: 0, fontSize: '13px', color: '#78350F', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                            {visit.symptoms || 'No specific symptoms logged.'}
+                            {visit.symptoms || 'No specific complaints logged.'}
                           </p>
                           {visit.department === 'orthopaedics' && (visit.painLocation || visit.side) && (
                             <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#92400E' }}>
@@ -301,11 +351,27 @@ export function ClinicalNotesPanel({
                               <CheckCircle2 size={14} />
                               <span>Previous Diagnosis</span>
                             </div>
-                            <p style={{ margin: 0, fontSize: '13px', color: '#14532D', fontWeight: 600, lineHeight: 1.5 }}>
-                              {visit.diagnosis}
-                            </p>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                              {parseDiagnosisTags(visit.diagnosis).map((tag, i) => (
+                                <span
+                                  key={i}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    padding: '3px 10px',
+                                    borderRadius: '999px',
+                                    background: '#DCFCE7',
+                                    color: '#14532D',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
                             {visit.treatmentPlan && (
-                              <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#166534' }}>
+                              <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#166534' }}>
                                 <strong>Advice:</strong> {visit.treatmentPlan}
                               </p>
                             )}
@@ -338,9 +404,9 @@ export function ClinicalNotesPanel({
                               <thead>
                                 <tr>
                                   <th style={{ width: '40px', textAlign: 'center' }}>#</th>
-                                  <th>Medicine Name & Strength</th>
-                                  <th>Dosage & Route</th>
-                                  <th>Frequency & Duration</th>
+                                  <th>Medicine Name &amp; Strength</th>
+                                  <th>Dosage &amp; Route</th>
+                                  <th>Frequency &amp; Duration</th>
                                   <th>Instructions</th>
                                   {onCopyPrescription && <th style={{ textAlign: 'center', width: '90px' }}>Action</th>}
                                 </tr>
@@ -354,6 +420,11 @@ export function ClinicalNotesPanel({
                                       <td>
                                         <strong style={{ color: 'var(--navy)' }}>{rx.medicineName}</strong>
                                         {rx.strength && <span style={{ color: 'var(--muted)', display: 'block', fontSize: '11px' }}>{rx.strength}</span>}
+                                        {rx.appliedAreas && rx.appliedAreas.length > 0 && (
+                                          <span style={{ color: '#047857', display: 'block', fontSize: '11px', fontWeight: 600, marginTop: '2px' }}>
+                                            📍 Area: {rx.appliedAreas.join(', ')}
+                                          </span>
+                                        )}
                                       </td>
                                       <td>
                                         <span>{rx.dosage || '—'}</span>
@@ -396,7 +467,7 @@ export function ClinicalNotesPanel({
                       <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '14px', background: '#FFFFFF' }}>
                         <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--navy)', display: 'inline-flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
                           <ImageIcon size={15} color="var(--teal)" />
-                          Uploaded Prescription & Attachments ({imgCount})
+                          Uploaded Prescription &amp; Attachments ({imgCount})
                         </span>
 
                         {imgCount > 0 ? (
@@ -481,7 +552,7 @@ export function ClinicalNotesPanel({
                           {visit.procedures && visit.procedures.length > 0 && (
                             <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px 14px' }}>
                               <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--navy)', display: 'block', marginBottom: '6px' }}>
-                                Procedures & Charges ({visit.procedures.length})
+                                Procedures &amp; Charges ({visit.procedures.length})
                               </span>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 {visit.procedures.map((p) => (
@@ -502,6 +573,141 @@ export function ClinicalNotesPanel({
             })}
           </div>
         )}
+      </Card>
+
+      {/* ── 3. Examination Findings ── */}
+      <Card>
+        <SectionHeading
+          title="Examination Findings"
+          subtitle="Record clinical observations, physical examination findings, and relevant signs noted during the visit."
+        />
+        <div style={{ marginTop: '12px' }}>
+          <textarea
+            id="clinical-examination"
+            className="control textarea"
+            value={consultation.examination}
+            onChange={(event) => onChange({ examination: event.target.value })}
+            placeholder="Document clinical findings, physical examination observations, and relevant signs..."
+            rows={4}
+            style={{ width: '100%', minHeight: 96 }}
+          />
+        </div>
+      </Card>
+
+      {/* ── 4. Diagnosis ── */}
+      <Card>
+        <SectionHeading
+          title="Diagnosis"
+          subtitle="Add one or more diagnoses for this visit. Type a diagnosis name and press Enter or Save."
+        />
+
+        {/* Tag display area */}
+        <div style={{ marginTop: '12px' }}>
+          {diagTags.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '8px',
+                marginBottom: '14px',
+                padding: '10px 12px',
+                background: '#F0FDF4',
+                border: '1px solid #BBF7D0',
+                borderRadius: '8px',
+              }}
+            >
+              {diagTags.map((tag, i) => (
+                <span
+                  key={i}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '4px 10px 4px 12px',
+                    borderRadius: '999px',
+                    background: '#DCFCE7',
+                    border: '1px solid #86EFAC',
+                    color: '#14532D',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {tag}
+                  {!isLocked && (
+                    <button
+                      type="button"
+                      onClick={() => removeDiagTag(tag)}
+                      aria-label={`Remove diagnosis: ${tag}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '16px',
+                        height: '16px',
+                        borderRadius: '50%',
+                        background: '#86EFAC',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: 0,
+                        color: '#14532D',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <X size={10} strokeWidth={2.5} />
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Input row */}
+          {!isLocked && (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+              <div style={{ flex: 1 }}>
+                <input
+                  ref={diagInputRef}
+                  id="diagnosis-input"
+                  type="text"
+                  className="control"
+                  value={diagInput}
+                  onChange={(e) => setDiagInput(e.target.value)}
+                  onKeyDown={handleDiagKeyDown}
+                  placeholder="Type a diagnosis name and press Enter or Save…"
+                  autoComplete="off"
+                />
+              </div>
+              <Button
+                variant="primary"
+                size="small"
+                onClick={addDiagTag}
+                disabled={!diagInput.trim()}
+                icon={<Plus size={14} />}
+                style={{ marginTop: '1px', whiteSpace: 'nowrap' }}
+              >
+                Save
+              </Button>
+            </div>
+          )}
+
+          {diagTags.length === 0 && (
+            <div
+              style={{
+                padding: '10px 14px',
+                marginTop: '14px',
+                background: '#F8FAFC',
+                border: '1px dashed #CBD5E1',
+                borderRadius: '8px',
+                fontSize: '12px',
+                color: 'var(--muted)',
+                fontStyle: 'italic',
+              }}
+            >
+              No diagnosis added yet. Type below and press Enter or click Save.
+            </div>
+          )}
+        </div>
       </Card>
 
       {/* Image Preview Modal */}
