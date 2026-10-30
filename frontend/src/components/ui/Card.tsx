@@ -8,6 +8,29 @@ export function SectionHeading({ title, subtitle, action }: { title: string; sub
   return <div className="card-heading"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{action}</div>;
 }
 
-export function StatCard({ label, value, hint, icon, detail }: { label: string; value: string | number; hint?: string; icon: ReactNode; detail?: ReactNode }) {
-  return <article className="stat-card"><div className="stat-top"><span className="stat-label">{label}</span><span className="stat-icon" aria-hidden="true">{icon}</span></div><div className="stat-value">{value}</div>{detail ? <div className="stat-foot">{detail}</div> : hint && <div className="stat-foot">{hint}</div>}</article>;
+export function StatCard({
+  label,
+  value,
+  hint,
+  icon,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+  icon: ReactNode;
+  detail?: ReactNode;
+  tone?: 'mint' | 'purple' | 'peach' | 'blue' | 'teal' | 'amber' | 'indigo' | 'rose';
+}) {
+  return (
+    <article className={`stat-card${tone ? ` tone-${tone}` : ''}`}>
+      <div className="stat-top">
+        <span className="stat-label">{label}</span>
+        <span className="stat-icon" aria-hidden="true">{icon}</span>
+      </div>
+      <div className="stat-value">{value}</div>
+      {detail ? <div className="stat-foot">{detail}</div> : hint && <div className="stat-foot">{hint}</div>}
+    </article>
+  );
 }

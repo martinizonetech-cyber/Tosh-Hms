@@ -116,185 +116,187 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <main className="login-panel">
-        <div className="login-top-bar">
-          <button
-            type="button"
-            className="login-back-btn"
+        <div className="login-content-wrap">
+          <div className="login-top-bar">
+            <button
+              type="button"
+              className="login-back-btn"
+              onClick={() => navigate('/')}
+              title="Return to hospital overview & services"
+            >
+              <ArrowLeft size={14} />
+              <span>Hospital Landing Page</span>
+            </button>
+            <span className="login-portal-tag">Staff Portal</span>
+          </div>
+
+          <div
+            className="login-brand login-brand-clickable"
             onClick={() => navigate('/')}
-            title="Return to hospital overview & services"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/'); }}
+            title="Go to Tosh Hospital Home Page"
           >
-            <ArrowLeft size={14} />
-            <span>Hospital Landing Page</span>
-          </button>
-          <span className="login-portal-tag">Staff Portal</span>
-        </div>
-
-        <div
-          className="login-brand login-brand-clickable"
-          onClick={() => navigate('/')}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/'); }}
-          title="Go to Tosh Hospital Home Page"
-        >
-          <span className="brand-mark login-brand-mark">
-            <img
-              className="brand-logo login-brand-logo"
-              src="/tosh-icon-circle.png"
-              alt="Trichy Ortho & Skin Logo"
-              onError={(e) => {
-                const target = e.currentTarget;
-                if (!target.src.includes('/images/image.png')) {
-                  target.src = '/images/image.png';
-                }
-              }}
-            />
-          </span>
-          <div className="login-brand-text">
-            <strong>TRICHY ORTHO & SKIN</strong>
-            <span>HEALTH FOUNDATION</span>
-          </div>
-        </div>
-        <div className="eyebrow">Skin & Orthopaedics</div>
-        <h1>Care, clearly<br />in motion.</h1>
-        <p>A connected workspace for the people who welcome, assess and support every patient visit.</p>
-
-        <div className="login-card">
-          <div className="login-card-head">
-            <div className="login-card-badge">
-              <ShieldCheck size={13} />
-              <span>Staff Authentication</span>
+            <span className="brand-mark login-brand-mark">
+              <img
+                className="brand-logo login-brand-logo"
+                src="/tosh-icon-circle.png"
+                alt="Trichy Ortho & Skin Logo"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (!target.src.includes('/images/image.png')) {
+                    target.src = '/images/image.png';
+                  }
+                }}
+              />
+            </span>
+            <div className="login-brand-text">
+              <strong>TRICHY ORTHO & SKIN</strong>
+              <span>HEALTH FOUNDATION</span>
             </div>
-            <h2 className="login-card-title">Sign in to your portal</h2>
-            <p className="login-card-subtitle">Select your clinic role to access your assigned care workspace</p>
           </div>
+          <div className="eyebrow login-eyebrow">Skin & Orthopaedics</div>
+          <h1 className="login-heading">Care, clearly in motion.</h1>
+          <p className="login-desc">A connected workspace for the people who welcome, assess and support every patient visit.</p>
 
-          <form onSubmit={handleLogin} className="login-form">
-            <div className="login-role-selector">
-              <label className="login-field-label">Department Role</label>
-              <div className="role-pills-row" role="radiogroup" aria-label="Select staff role">
-                {roles.map((role) => {
-                  const isSelected = selectedRole === role.id;
-                  return (
-                    <button
-                      key={role.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={isSelected}
-                      className={`role-pill-btn${isSelected ? ' active' : ''}`}
-                      onClick={() => handleRoleSelect(role)}
-                    >
-                      <span className="role-pill-icon">{role.emoji}</span>
-                      <span>{role.label}</span>
-                    </button>
-                  );
-                })}
+          <div className="login-card">
+            <div className="login-card-head">
+              <div className="login-card-badge">
+                <ShieldCheck size={13} />
+                <span>Staff Authentication</span>
               </div>
+              <h2 className="login-card-title">Sign in to your portal</h2>
+              <p className="login-card-subtitle">Select your clinic role to access your assigned care workspace</p>
             </div>
 
-            {selectedRole !== 'reception' && doctorsForDepartment.length > 0 && (
-              <div className="login-field-group">
-                <label htmlFor="login-doctor-select" className="login-field-label">Assigned Clinician (from API)</label>
-                <div className="login-input-wrap">
-                  <UserCheck size={17} className="login-input-icon" />
-                  <select
-                    id="login-doctor-select"
-                    className="login-input-field"
-                    value={email}
-                    onChange={(e) => handleDoctorChange(e.target.value)}
-                  >
-                    {doctorsForDepartment.map((doc) => (
-                      <option key={doc.id} value={doc.email || ''}>
-                        {doc.displayName} ({doc.department === 'skin' ? 'Dermatology' : 'Orthopaedics'})
-                      </option>
-                    ))}
-                  </select>
+            <form onSubmit={handleLogin} className="login-form">
+              <div className="login-role-selector">
+                <label className="login-field-label">Department Role</label>
+                <div className="role-pills-row" role="radiogroup" aria-label="Select staff role">
+                  {roles.map((role) => {
+                    const isSelected = selectedRole === role.id;
+                    return (
+                      <button
+                        key={role.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        className={`role-pill-btn${isSelected ? ' active' : ''}`}
+                        onClick={() => handleRoleSelect(role)}
+                      >
+                        <span className="role-pill-icon">{role.emoji}</span>
+                        <span>{role.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
-            )}
 
-            <div className="login-field-group">
-              <label htmlFor="login-email" className="login-field-label">Staff Email / User ID</label>
-              <div className="login-input-wrap">
-                <Mail size={17} className="login-input-icon" />
-                <input
-                  id="login-email"
-                  type="text"
-                  className="login-input-field"
-                  placeholder="Enter staff email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="username"
-                  required
-                />
+              {selectedRole !== 'reception' && doctorsForDepartment.length > 0 && (
+                <div className="login-field-group">
+                  <label htmlFor="login-doctor-select" className="login-field-label">Assigned Clinician (from API)</label>
+                  <div className="login-input-wrap">
+                    <UserCheck size={17} className="login-input-icon" />
+                    <select
+                      id="login-doctor-select"
+                      className="login-input-field"
+                      value={email}
+                      onChange={(e) => handleDoctorChange(e.target.value)}
+                    >
+                      {doctorsForDepartment.map((doc) => (
+                        <option key={doc.id} value={doc.email || ''}>
+                          {doc.displayName} ({doc.department === 'skin' ? 'Dermatology' : 'Orthopaedics'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className="login-field-group">
+                <label htmlFor="login-email" className="login-field-label">Staff Email / User ID</label>
+                <div className="login-input-wrap">
+                  <Mail size={17} className="login-input-icon" />
+                  <input
+                    id="login-email"
+                    type="text"
+                    className="login-input-field"
+                    placeholder="Enter staff email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    autoComplete="username"
+                    required
+                  />
+                </div>
               </div>
-            </div>
 
-            <div className="login-field-group">
-              <div className="login-password-header">
-                <label htmlFor="login-password" className="login-field-label">Password</label>
-                <button
-                  type="button"
-                  className="login-forgot-link"
-                  onClick={handleForgotPassword}
-                >
-                  Forgot password?
-                </button>
+              <div className="login-field-group">
+                <div className="login-password-header">
+                  <label htmlFor="login-password" className="login-field-label">Password</label>
+                  <button
+                    type="button"
+                    className="login-forgot-link"
+                    onClick={handleForgotPassword}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                <div className="login-input-wrap">
+                  <Lock size={17} className="login-input-icon" />
+                  <input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    className="login-input-field"
+                    placeholder="Enter password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="login-password-toggle"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
-              <div className="login-input-wrap">
-                <Lock size={17} className="login-input-icon" />
-                <input
-                  id="login-password"
-                  type={showPassword ? 'text' : 'password'}
-                  className="login-input-field"
-                  placeholder="Enter password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                  required
-                />
-                <button
-                  type="button"
-                  className="login-password-toggle"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
 
-            <button type="submit" className="login-submit-btn" disabled={isSubmitting}>
-              <span>{isSubmitting ? 'Signing in...' : 'Sign In to Clinic Workspace'}</span>
-              <ArrowRight size={17} />
-            </button>
-          </form>
-        </div>
-
-        <div className="login-landing-banner">
-          <div className="login-landing-banner-info">
-            <Globe size={16} className="login-landing-banner-icon" />
-            <div>
-              <strong>Patient or visitor?</strong>
-              <span>Explore our clinical services, specialties & doctor profiles.</span>
-            </div>
+              <button type="submit" className="login-submit-btn" disabled={isSubmitting}>
+                <span>{isSubmitting ? 'Signing in...' : 'Sign In to Clinic Workspace'}</span>
+                <ArrowRight size={17} />
+              </button>
+            </form>
           </div>
-          <button
-            type="button"
-            className="login-landing-banner-btn"
-            onClick={() => navigate('/')}
-            title="Locate Tosh Hospital Landing Page"
-          >
-            <span>Hospital Home</span>
-            <ArrowRight size={13} />
-          </button>
-        </div>
 
-        <p className="login-footnote">
-          {isMock
-            ? 'Demonstration only · No real patient records, messages, payments, or clinical guidance are generated.'
-            : 'Tosh Clinic HMS · Production API connection active.'}
-        </p>
+          <div className="login-landing-banner">
+            <div className="login-landing-banner-info">
+              <Globe size={16} className="login-landing-banner-icon" />
+              <div>
+                <strong>Patient or visitor?</strong>
+                <span>Explore our clinical services, specialties & doctor profiles.</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="login-landing-banner-btn"
+              onClick={() => navigate('/')}
+              title="Locate Tosh Hospital Landing Page"
+            >
+              <span>Hospital Home</span>
+              <ArrowRight size={13} />
+            </button>
+          </div>
+
+          <p className="login-footnote">
+            {isMock
+              ? 'Demonstration only · No real patient records, messages, payments, or clinical guidance are generated.'
+              : 'Tosh Clinic HMS · Production API connection active.'}
+          </p>
+        </div>
       </main>
       <aside className="login-photo" aria-label="Clinic interior">
         <img

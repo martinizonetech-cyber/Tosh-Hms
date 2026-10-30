@@ -127,10 +127,10 @@ a:focus:not(:focus-visible) {
   position: fixed;
   inset: 0 auto 0 0;
   width: var(--sidebar-width);
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
   background: var(--navy);
   color: #fff;
   z-index: 40;
@@ -154,13 +154,17 @@ a:focus:not(:focus-visible) {
 }
 
 .sidebar-brand {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
   min-height: 68px;
   padding: 14px 18px;
   display: flex;
   align-items: center;
   gap: 11px;
   border-bottom: 1px solid rgba(255, 255, 255, .11);
-  white-space: nowrap
+  white-space: nowrap;
+  background: var(--navy);
 }
 
 .brand-mark {
@@ -215,65 +219,166 @@ a:focus:not(:focus-visible) {
 }
 
 .sidebar-photo {
-  height: 138px;
-  margin: 14px 14px 17px;
-  border-radius: 13px;
+  height: 140px;
+  margin: 15px 14px 16px;
+  border-radius: 14px;
   position: relative;
   overflow: hidden;
-  background: linear-gradient(140deg, #789196, #344F5B)
+  flex-shrink: 0;
+  z-index: 2;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  background: #17324D;
 }
 
 .sidebar-photo::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(18, 43, 63, .2), rgba(16, 44, 65, .7));
-  z-index: 1
+  background: linear-gradient(180deg, rgba(14, 38, 62, 0.2) 0%, rgba(12, 33, 54, 0.45) 45%, rgba(10, 26, 43, 0.88) 100%);
+  z-index: 1;
 }
 
 .sidebar-photo img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: .87
+  object-position: center;
+  opacity: 0.92;
+  display: block;
 }
 
 .sidebar-photo-copy {
   position: absolute;
   z-index: 2;
-  left: 13px;
-  right: 12px;
-  bottom: 12px
+  left: 15px;
+  right: 14px;
+  bottom: 14px;
 }
 
 .sidebar-photo-copy span {
   display: block;
-  font-size: 11px;
-  color: rgba(255, 255, 255, .82);
-  letter-spacing: .06em;
-  text-transform: uppercase
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.86);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.2;
 }
 
 .sidebar-photo-copy strong {
   display: block;
-  margin-top: 5px;
+  margin-top: 4px;
   font-family: 'Lora', Georgia, serif;
-  font-size: 16px;
-  color: #fff;
-  line-height: 1.2
+  font-size: 22px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
+
+/* Strictly for Skin portal: keep "Skin & Dermatology" on ONE single line */
+.sidebar-photo-copy strong.is-skin,
+.portal-skin .sidebar-photo-copy strong {
+  font-size: 16.5px;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+}
+
+/* Strictly for Reception portal */
+.portal-reception .sidebar-photo-copy strong {
+  font-size: 18.5px;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .is-sidebar-collapsed .sidebar-photo {
-  height: 50px;
-  margin: 14px 12px;
-  background: #244761
+  display: none;
+}
+
+.sidebar-bg-art {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+/* Orthopaedics spine art - strictly untouched */
+.sidebar-bg-img {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 75%;
+  object-fit: cover;
+  object-position: right bottom;
+  opacity: 0.50;
+  filter: saturate(1.15);
+}
+
+/* Skin portal sidebar illustration - strictly scoped to Skin */
+.sidebar-bg-img.is-skin {
+  top: 228px;
+  bottom: 0;
+  height: calc(100% - 228px);
+  object-fit: cover;
+  object-position: right top;
+  opacity: 0.54;
+  filter: saturate(1.1);
+}
+
+/* Reception portal sidebar illustration - strictly scoped to Reception */
+.sidebar-bg-img.is-reception {
+  top: 228px;
+  bottom: 0;
+  height: calc(100% - 228px);
+  object-fit: cover;
+  object-position: right 30%;
+  opacity: 0.62;
+  filter: saturate(1.15);
+}
+
+.sidebar-bg-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+      var(--navy) 0%,
+      rgba(11, 37, 69, 0.32) 28%,
+      rgba(11, 37, 69, 0.52) 62%,
+      rgba(11, 37, 69, 0.84) 90%,
+      var(--navy) 100%);
 }
 
 .sidebar-nav {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   align-content: start;
   gap: 4px;
-  padding: 0 11px 16px
+  padding: 10px 11px 16px;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .nav-section-label {
@@ -330,9 +435,15 @@ a:focus:not(:focus-visible) {
 }
 
 .sidebar-footer {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
   margin-top: auto;
-  padding: 13px 12px 16px;
-  border-top: 1px solid rgba(255, 255, 255, .1)
+  padding: 11px 12px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(16, 44, 65, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .sidebar-profile {
@@ -341,6 +452,15 @@ a:focus:not(:focus-visible) {
   gap: 10px;
   min-width: 0;
   width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 8px 10px;
+  transition: background 0.18s ease;
+}
+
+.sidebar-profile:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .sidebar-avatar {
@@ -594,6 +714,231 @@ a:focus:not(:focus-visible) {
   min-width: 0
 }
 
+/* Clinical Editorial Hero Banner */
+.clinical-hero-banner {
+  display: flex;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 18px;
+  min-height: 136px;
+  border-radius: 16px;
+  background: #FCFAF6;
+  border: 1px solid #F1E9DC;
+  box-shadow: 0 4px 18px rgba(18, 43, 63, 0.035);
+}
+
+.clinical-hero-main {
+  position: relative;
+  z-index: 2;
+  padding: 14px 22px;
+  max-width: 460px;
+  flex-shrink: 0;
+}
+
+.clinical-hero-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #BA7329;
+  margin-bottom: 4px;
+}
+
+.clinical-hero-title {
+  font-family: 'Lora', Georgia, serif;
+  font-size: 20.5px;
+  font-weight: 600;
+  color: #0F2942;
+  margin: 0 0 3px 0;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.clinical-hero-desc {
+  font-size: 12.5px;
+  color: #627D98;
+  margin: 0 0 11px 0;
+  line-height: 1.35;
+}
+
+.clinical-hero-action .btn,
+.clinical-hero-action button {
+  background: #0F2942 !important;
+  color: #FFFFFF !important;
+  border: none !important;
+  border-radius: 8px;
+  padding: 0 14px;
+  height: 33px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: 0 2px 5px rgba(15, 41, 66, 0.2);
+}
+
+.clinical-hero-action .btn:hover,
+.clinical-hero-action button:hover {
+  background: #1B3C5E !important;
+}
+
+.clinical-hero-quote {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid rgba(192, 125, 56, 0.35);
+  padding: 4px 0 4px 14px;
+  max-width: 220px;
+  margin-left: auto;
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.clinical-quote-mark {
+  font-family: 'Lora', Georgia, serif;
+  font-size: 26px;
+  line-height: 0.75;
+  color: #C07D38;
+  margin-top: 3px;
+  opacity: 0.9;
+  flex-shrink: 0;
+}
+
+.clinical-quote-text,
+.clinical-hero-quote p {
+  margin: 0;
+  font-family: 'Lora', Georgia, serif;
+  font-style: italic;
+  font-size: 12.5px;
+  line-height: 1.46;
+  color: #2D4863;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+}
+
+.clinical-hero-media {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.1) 8%, rgba(0, 0, 0, 0.55) 22%, black 45%);
+  mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.1) 8%, rgba(0, 0, 0, 0.55) 22%, black 45%);
+}
+
+/* Orthopaedics Quote & Media - Strictly scoped to Orthopaedics portal */
+.clinical-hero-banner.dept-orthopaedics .clinical-hero-quote,
+.clinical-hero-quote:not(.dept-skin) {
+  margin-right: clamp(210px, 22vw, 310px);
+}
+
+.clinical-hero-banner.dept-orthopaedics .clinical-hero-media,
+.clinical-hero-media:not(.dept-skin):not(.is-skin) {
+  width: 48%;
+  max-width: 580px;
+}
+
+.clinical-hero-banner.dept-orthopaedics .clinical-hero-img,
+.clinical-hero-img:not(.dept-skin):not(.is-skin) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+}
+
+/* Skin Quote & Media - Strictly scoped to Skin portal */
+.clinical-hero-banner.dept-skin {
+  min-height: 152px;
+}
+
+.clinical-hero-banner.dept-skin .clinical-hero-quote {
+  margin-right: clamp(200px, 21vw, 290px);
+  max-width: 230px;
+}
+
+.clinical-hero-banner.dept-skin .clinical-hero-media,
+.clinical-hero-media.dept-skin,
+.clinical-hero-media.is-skin {
+  width: 45%;
+  max-width: 600px;
+}
+
+.clinical-hero-banner.dept-skin .clinical-hero-img,
+.clinical-hero-img.dept-skin,
+.clinical-hero-img.is-skin {
+  object-fit: cover;
+  object-position: right 22%;
+}
+
+/* Reception Hero Banner - Strictly scoped to Reception portal */
+.clinical-hero-banner.dept-reception {
+  min-height: 146px;
+}
+
+.clinical-hero-banner.dept-reception .clinical-hero-quote {
+  margin-right: clamp(235px, 22vw, 330px);
+  max-width: 230px;
+}
+
+.clinical-hero-banner.dept-reception .clinical-hero-media,
+.clinical-hero-media.dept-reception {
+  width: 50%;
+  max-width: 620px;
+}
+
+.clinical-hero-banner.dept-reception .clinical-hero-img,
+.clinical-hero-img.dept-reception {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right 25%;
+}
+
+.clinical-hero-fade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #FCFAF6 0%, rgba(252, 250, 246, 0.85) 12%, rgba(252, 250, 246, 0.3) 30%, rgba(252, 250, 246, 0) 60%);
+  pointer-events: none;
+}
+
+@media (max-width: 1100px) {
+  .clinical-hero-quote {
+    display: none;
+  }
+
+  .clinical-hero-media {
+    width: 44%;
+  }
+}
+
+@media (max-width: 768px) {
+  .clinical-hero-banner {
+    flex-direction: column;
+    align-items: stretch;
+    min-height: auto;
+  }
+
+  .clinical-hero-title {
+    white-space: normal;
+  }
+
+  .clinical-hero-media {
+    position: relative;
+    width: 100%;
+    height: 140px;
+    min-width: 0;
+  }
+
+  .clinical-hero-fade {
+    background: linear-gradient(180deg, #FCFAF6 0%, rgba(252, 250, 246, 0) 50%);
+  }
+}
+
 .page-heading {
   display: flex;
   justify-content: space-between;
@@ -791,57 +1136,224 @@ a:focus:not(:focus-visible) {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 13px;
-  margin-bottom: 16px
+  gap: 14px;
+  margin-bottom: 18px;
 }
 
 .stat-card {
   min-width: 0;
-  padding: 15px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  background: #fff;
-  box-shadow: 0 3px 12px rgba(23, 50, 77, .025)
+  position: relative;
+  overflow: hidden;
+  padding: 16px 18px 18px;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  background: #FFFFFF;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.03);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+/* Inset top colored accent bar */
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 18px;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: #CBD5E1;
 }
 
 .stat-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px
+  gap: 10px;
 }
 
 .stat-label {
   font-size: 13px !important;
   font-weight: 600;
-  color: var(--muted);
+  color: #475569;
 }
 
 .stat-icon {
-  width: 29px;
-  height: 29px;
-  border-radius: 9px;
-  display: grid;
-  place-items: center;
-  background: var(--pale);
-  color: var(--teal)
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: #F1F5F9;
+  color: #475569;
+  transition: transform 0.2s ease;
 }
 
 .stat-value {
-  margin-top: 8px;
-  color: var(--navy);
-  font-size: 22px;
-  line-height: 1.15;
+  margin-top: 10px;
+  color: #0F172A;
+  font-size: 27px;
+  line-height: 1.1;
   font-weight: 700;
-  letter-spacing: -.04em;
-  overflow-wrap: anywhere
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
 }
 
 .stat-foot {
-  margin-top: 5px;
-  color: #8795A2;
-  font-size: 12px !important;
-  line-height: 1.4
+  margin-top: 6px;
+  color: #94A3B8;
+  font-size: 11.5px !important;
+  line-height: 1.35;
+}
+
+/* 1. Mint / Green (Today's appointments) */
+.stat-card.tone-mint,
+.stats-grid>.stat-card:nth-child(1) {
+  background: linear-gradient(180deg, #F0FDF4 0%, #FFFFFF 55%);
+  border-color: #DCFCE7;
+}
+
+.stat-card.tone-mint::before,
+.stats-grid>.stat-card:nth-child(1)::before {
+  background: #34D399;
+}
+
+.stat-card.tone-mint .stat-icon,
+.stats-grid>.stat-card:nth-child(1) .stat-icon {
+  background: #DCFCE7;
+  color: #059669;
+}
+
+/* 2. Lavender / Purple (Waiting patients) */
+.stat-card.tone-purple,
+.stats-grid>.stat-card:nth-child(2) {
+  background: linear-gradient(180deg, #FAF5FF 0%, #FFFFFF 55%);
+  border-color: #F3E8FF;
+}
+
+.stat-card.tone-purple::before,
+.stats-grid>.stat-card:nth-child(2)::before {
+  background: #C084FC;
+}
+
+.stat-card.tone-purple .stat-icon,
+.stats-grid>.stat-card:nth-child(2) .stat-icon {
+  background: #F3E8FF;
+  color: #9333EA;
+}
+
+/* 3. Peach / Coral (In consultation) */
+.stat-card.tone-peach,
+.stats-grid>.stat-card:nth-child(3) {
+  background: linear-gradient(180deg, #FFF7ED 0%, #FFFFFF 55%);
+  border-color: #FFEDD5;
+}
+
+.stat-card.tone-peach::before,
+.stats-grid>.stat-card:nth-child(3)::before {
+  background: #FDBA74;
+}
+
+.stat-card.tone-peach .stat-icon,
+.stats-grid>.stat-card:nth-child(3) .stat-icon {
+  background: #FFEDD5;
+  color: #EA580C;
+}
+
+/* 4. Sky Blue (Completed visits) */
+.stat-card.tone-blue,
+.stats-grid>.stat-card:nth-child(4) {
+  background: linear-gradient(180deg, #F0F9FF 0%, #FFFFFF 55%);
+  border-color: #E0F2FE;
+}
+
+.stat-card.tone-blue::before,
+.stats-grid>.stat-card:nth-child(4)::before {
+  background: #7DD3FC;
+}
+
+.stat-card.tone-blue .stat-icon,
+.stats-grid>.stat-card:nth-child(4) .stat-icon {
+  background: #E0F2FE;
+  color: #0284C7;
+}
+
+/* 5. Soft Teal (Follow-ups due) */
+.stat-card.tone-teal,
+.stats-grid>.stat-card:nth-child(5) {
+  background: linear-gradient(180deg, #F0FDFA 0%, #FFFFFF 55%);
+  border-color: #CCFBF1;
+}
+
+.stat-card.tone-teal::before,
+.stats-grid>.stat-card:nth-child(5)::before {
+  background: #5EEAD4;
+}
+
+.stat-card.tone-teal .stat-icon,
+.stats-grid>.stat-card:nth-child(5) .stat-icon {
+  background: #CCFBF1;
+  color: #0D9488;
+}
+
+/* 6. Warm Amber (Outstanding balances) */
+.stat-card.tone-amber,
+.stats-grid>.stat-card:nth-child(6) {
+  background: linear-gradient(180deg, #FEFCE8 0%, #FFFFFF 55%);
+  border-color: #FEF08A;
+}
+
+.stat-card.tone-amber::before,
+.stats-grid>.stat-card:nth-child(6)::before {
+  background: #FACC15;
+}
+
+.stat-card.tone-amber .stat-icon,
+.stats-grid>.stat-card:nth-child(6) .stat-icon {
+  background: #FEF9C3;
+  color: #CA8A04;
+}
+
+/* 7. Soft Indigo (Follow-ups due soon) */
+.stat-card.tone-indigo,
+.stats-grid>.stat-card:nth-child(7) {
+  background: linear-gradient(180deg, #EEF2FF 0%, #FFFFFF 55%);
+  border-color: #E0E7FF;
+}
+
+.stat-card.tone-indigo::before,
+.stats-grid>.stat-card:nth-child(7)::before {
+  background: #818CF8;
+}
+
+.stat-card.tone-indigo .stat-icon,
+.stats-grid>.stat-card:nth-child(7) .stat-icon {
+  background: #E0E7FF;
+  color: #4F46E5;
+}
+
+/* 8. Gentle Rose (Departments active) */
+.stat-card.tone-rose,
+.stats-grid>.stat-card:nth-child(8) {
+  background: linear-gradient(180deg, #FFF1F2 0%, #FFFFFF 55%);
+  border-color: #FFE4E6;
+}
+
+.stat-card.tone-rose::before,
+.stats-grid>.stat-card:nth-child(8)::before {
+  background: #FB7185;
+}
+
+.stat-card.tone-rose .stat-icon,
+.stats-grid>.stat-card:nth-child(8) .stat-icon {
+  background: #FFE4E6;
+  color: #E11D48;
 }
 
 .content-grid {
@@ -2290,7 +2802,7 @@ a:focus:not(:focus-visible) {
   padding: 14px 0;
 }
 
-.invoice-parties > div {
+.invoice-parties>div {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -3528,33 +4040,41 @@ body.print-doctor-report .card {
   }
 }
 
-/* Login and demo portal selection */
+/* Login and demo portal selection - Fixed 100vh Screen */
 .login-page {
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
+  width: 100%;
   overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(500px, 1.05fr) minmax(0, 1fr);
-  background: #fff;
+  grid-template-columns: minmax(490px, 1.05fr) minmax(0, 1fr);
+  background: #ffffff;
 }
 
 .login-panel {
   width: 100%;
-  max-width: 530px;
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
-  margin: 0 auto;
-  padding: clamp(18px, 3vh, 36px) clamp(28px, 4vw, 56px);
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
   box-sizing: border-box;
-  overflow-y: auto;
-  scrollbar-width: none;
+  padding: clamp(18px, 2.8vh, 32px) clamp(24px, 4vw, 48px);
+  overflow: hidden;
 }
 
-.login-panel::-webkit-scrollbar {
-  display: none;
+.login-content-wrap {
+  width: 100%;
+  max-width: 490px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
 /* Login Top Bar and Landing Page Navigation Button */
@@ -3562,7 +4082,8 @@ body.print-doctor-report .card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: clamp(12px, 1.8vh, 20px);
+  gap: 12px;
+  margin-bottom: clamp(10px, 1.8vh, 16px);
   width: 100%;
 }
 
@@ -3573,12 +4094,13 @@ body.print-doctor-report .card {
   background: #f1f5f9;
   border: 1px solid #e2e8f0;
   border-radius: 9999px;
-  padding: 6px 14px;
+  padding: 5px 14px;
   font-size: 12px;
   font-weight: 600;
   color: #1e293b;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
 }
 
 .login-back-btn:hover {
@@ -3592,13 +4114,14 @@ body.print-doctor-report .card {
 .login-portal-tag {
   font-size: 10.5px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #94a3b8;
   background: #f8fafc;
   padding: 4px 10px;
   border-radius: 6px;
   border: 1px solid #e2e8f0;
+  white-space: nowrap;
 }
 
 .login-brand-clickable {
@@ -3614,16 +4137,17 @@ body.print-doctor-report .card {
 .login-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: clamp(16px, 2.4vh, 28px);
+  gap: 12px;
+  margin-bottom: clamp(10px, 1.6vh, 16px);
+  width: fit-content;
 }
 
 .login-brand .brand-mark,
 .login-brand-mark {
-  width: 48px !important;
-  height: 48px !important;
-  min-width: 48px !important;
-  min-height: 48px !important;
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px !important;
+  min-height: 44px !important;
   border-radius: 50% !important;
   border: none !important;
   box-shadow: none !important;
@@ -3639,8 +4163,8 @@ body.print-doctor-report .card {
 
 .login-brand .brand-logo,
 .login-brand-logo {
-  width: 48px !important;
-  height: 48px !important;
+  width: 44px !important;
+  height: 44px !important;
   max-width: 100% !important;
   max-height: 100% !important;
   object-fit: contain !important;
@@ -3662,62 +4186,66 @@ body.print-doctor-report .card {
 
 .login-brand strong {
   font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 15.5px;
+  font-size: 15px;
   color: var(--navy);
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   line-height: 1.25;
 }
 
 .login-brand span {
   margin-top: 2px;
   color: var(--teal);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
 }
 
-.login-panel .eyebrow {
-  font-size: 11.5px;
+.login-panel .eyebrow,
+.login-eyebrow {
+  font-size: 11px;
   color: var(--teal);
   font-weight: 700;
-  letter-spacing: .12em;
-  margin-bottom: 6px;
+  letter-spacing: .11em;
+  margin-bottom: 4px;
+  text-transform: uppercase;
 }
 
-.login-panel h1 {
-  margin: 4px 0 10px;
+.login-panel h1,
+.login-heading {
+  margin: 0 0 5px;
   font-family: 'Lora', Georgia, serif;
-  font-size: clamp(34px, 3.2vw, 44px);
-  line-height: 1.1;
-  letter-spacing: -.03em;
+  font-size: clamp(26px, 2.6vw, 32px);
+  line-height: 1.15;
+  letter-spacing: -.02em;
   font-weight: 600;
   color: var(--navy);
 }
 
+.login-desc,
 .login-panel>p:not(.login-footnote) {
-  max-width: 500px;
-  margin-bottom: clamp(12px, 1.8vh, 18px);
+  width: 100%;
+  margin-bottom: clamp(10px, 1.6vh, 16px);
   color: #5B6E7C;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .login-card {
   width: 100%;
-  max-width: 500px;
   background: #FFFFFF;
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: clamp(16px, 2.2vh, 22px) clamp(16px, 2vw, 22px);
-  box-shadow: 0 10px 30px -4px rgba(23, 50, 77, 0.06), 0 2px 6px -1px rgba(23, 50, 77, 0.03);
+  padding: clamp(14px, 2vh, 18px) clamp(16px, 2vw, 20px);
+  box-shadow: 0 8px 26px -4px rgba(23, 50, 77, 0.06), 0 2px 6px -1px rgba(23, 50, 77, 0.03);
   margin-top: 0;
+  box-sizing: border-box;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .login-card:hover {
-  box-shadow: 0 14px 36px -4px rgba(23, 50, 77, 0.09), 0 2px 8px -1px rgba(23, 50, 77, 0.04);
+  box-shadow: 0 12px 32px -4px rgba(23, 50, 77, 0.08), 0 2px 8px -1px rgba(23, 50, 77, 0.04);
 }
 
 .login-card-head {
@@ -3727,9 +4255,9 @@ body.print-doctor-report .card {
   justify-content: center;
   text-align: center;
   width: 100%;
-  gap: 4px;
-  margin-bottom: 12px;
-  padding-bottom: 10px;
+  gap: 3px;
+  margin-bottom: 10px;
+  padding-bottom: 7px;
   border-bottom: 1px solid var(--soft-line);
 }
 
@@ -3738,10 +4266,10 @@ body.print-doctor-report .card {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
   padding: 3px 9px;
   border-radius: 20px;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--teal);
   background: var(--pale);
@@ -3752,7 +4280,7 @@ body.print-doctor-report .card {
 
 .login-card-title {
   font-family: 'DM Sans', sans-serif;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--navy);
   margin: 0;
@@ -3762,7 +4290,7 @@ body.print-doctor-report .card {
 }
 
 .login-card-subtitle {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--muted);
   margin: 0;
   line-height: 1.35;
@@ -3773,32 +4301,14 @@ body.print-doctor-report .card {
 .login-role-selector {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: clamp(8px, 1.3vh, 12px);
+  gap: clamp(8px, 1.2vh, 11px);
   width: 100%;
-}
-
-.login-quick-access {
-  background: #F8FAFB;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 10px;
-  box-shadow: 0 2px 8px rgba(23, 50, 77, 0.04);
-}
-
-.quick-access-header {
-  text-align: center;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  margin-bottom: 11px;
-  text-transform: uppercase;
 }
 
 .role-pills-row {
@@ -3812,9 +4322,9 @@ body.print-doctor-report .card {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 6px;
+  padding: 7px 5px;
   border-radius: 9px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   border: 1.5px solid var(--line);
   background: #F8FAFB;
@@ -3839,18 +4349,18 @@ body.print-doctor-report .card {
 }
 
 .role-pill-icon {
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1;
 }
 
 .login-field-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .login-field-label {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--navy);
 }
@@ -3865,7 +4375,7 @@ body.print-doctor-report .card {
   background: none;
   border: none;
   padding: 0;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--muted);
   cursor: pointer;
@@ -3883,22 +4393,22 @@ body.print-doctor-report .card {
   align-items: center;
   background: #FAFCFD;
   border: 1.5px solid var(--line);
-  border-radius: 10px;
+  border-radius: 9px;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
-  padding: 0 13px;
-  height: 42px;
+  padding: 0 12px;
+  height: 38px;
 }
 
 .login-input-wrap:focus-within {
   background: #FFFFFF;
   border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgba(23, 126, 137, 0.14);
+  box-shadow: 0 0 0 2.5px rgba(23, 126, 137, 0.14);
 }
 
 .login-input-icon {
   color: #94A3B8;
   flex-shrink: 0;
-  margin-right: 9px;
+  margin-right: 8px;
 }
 
 .login-input-field {
@@ -3906,7 +4416,7 @@ body.print-doctor-report .card {
   border: none;
   background: transparent;
   outline: none;
-  font-size: 13px;
+  font-size: 12.5px;
   color: #1E293B;
   font-family: inherit;
   width: 100%;
@@ -3919,7 +4429,7 @@ body.print-doctor-report .card {
 .login-password-toggle {
   background: none;
   border: none;
-  padding: 5px;
+  padding: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3936,27 +4446,27 @@ body.print-doctor-report .card {
 .login-submit-btn {
   margin-top: 3px;
   width: 100%;
-  height: 44px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 7px;
   background: var(--navy);
   border: none;
-  border-radius: 10px;
+  border-radius: 9px;
   color: #FFFFFF;
-  font-size: 14.5px;
+  font-size: 13.5px;
   font-weight: 600;
   letter-spacing: -0.01em;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(23, 50, 77, 0.22);
+  box-shadow: 0 3px 10px rgba(23, 50, 77, 0.2);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 
 .login-submit-btn:hover {
   background: #214561;
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(23, 50, 77, 0.3);
+  box-shadow: 0 5px 14px rgba(23, 50, 77, 0.28);
 }
 
 .login-submit-btn:active {
@@ -3964,24 +4474,23 @@ body.print-doctor-report .card {
 }
 
 .login-landing-banner {
-  margin-top: clamp(12px, 1.8vh, 18px);
-  padding: 11px 14px;
+  margin-top: clamp(8px, 1.4vh, 12px);
+  padding: 8px 14px;
   background: #f8fafc;
   border: 1px dashed #cbd5e1;
-  border-radius: 12px;
+  border-radius: 11px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 11px;
   width: 100%;
-  max-width: 500px;
   box-sizing: border-box;
 }
 
 .login-landing-banner-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   font-size: 11.5px;
   line-height: 1.35;
   color: #475569;
@@ -3990,14 +4499,14 @@ body.print-doctor-report .card {
 .login-landing-banner-info strong {
   display: block;
   color: var(--navy);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
 }
 
 .login-landing-banner-info span {
   display: block;
   color: #64748b;
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 .login-landing-banner-icon {
@@ -4011,9 +4520,9 @@ body.print-doctor-report .card {
   gap: 5px;
   background: #ffffff;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 11.5px;
+  border-radius: 7px;
+  padding: 5px 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--navy);
   white-space: nowrap;
@@ -4027,16 +4536,17 @@ body.print-doctor-report .card {
   color: #ffffff;
   border-color: var(--navy);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(16, 35, 61, 0.15);
+  box-shadow: 0 3px 8px rgba(16, 35, 61, 0.15);
 }
 
 .login-footnote {
-  margin: clamp(8px, 1.4vh, 14px) 0 0;
+  margin: clamp(8px, 1.2vh, 10px) 0 0;
   color: #8A969D;
   font-size: 10.5px;
-  line-height: 1.45;
-  max-width: 500px;
+  line-height: 1.4;
+  width: 100%;
   text-align: center;
+  box-sizing: border-box;
 }
 
 .login-photo {
@@ -4116,6 +4626,165 @@ body.print-doctor-report .card {
   font-size: 11px;
   line-height: 1.65;
 }
+
+/* Login Responsive Alignment Across All Devices */
+@media (max-width: 1024px) {
+  .login-page {
+    grid-template-columns: 1fr;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .login-photo {
+    display: none;
+  }
+
+  .login-panel {
+    height: 100vh;
+    height: 100dvh;
+    padding: clamp(18px, 2.8vh, 32px) clamp(20px, 4vw, 40px);
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .login-content-wrap {
+    max-width: 480px;
+    margin: auto;
+  }
+}
+
+@media (max-width: 680px), (max-height: 550px) {
+  .login-page {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-y: auto;
+  }
+
+  .login-panel {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 16px 14px;
+    justify-content: flex-start;
+    overflow-y: auto;
+  }
+
+  .login-content-wrap {
+    max-width: 440px;
+    margin: auto;
+    padding: 6px 0 16px;
+  }
+
+  .login-brand {
+    margin-bottom: 8px;
+    gap: 8px;
+  }
+
+  .login-brand .brand-mark,
+  .login-brand-mark {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+  }
+
+  .login-brand .brand-logo,
+  .login-brand-logo {
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  .login-brand strong {
+    font-size: 13.5px;
+  }
+
+  .login-panel h1,
+  .login-heading {
+    font-size: clamp(20px, 5.5vw, 25px);
+    line-height: 1.2;
+    margin: 0 0 4px;
+  }
+
+  .login-desc,
+  .login-panel>p:not(.login-footnote) {
+    font-size: 11.5px;
+    margin-bottom: 8px;
+  }
+
+  .login-card {
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+
+  .login-footnote {
+    margin-top: 10px;
+    font-size: 9.5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-top-bar {
+    margin-bottom: 12px;
+  }
+
+  .login-back-btn {
+    padding: 5px 12px;
+    font-size: 11px;
+  }
+
+  .login-portal-tag {
+    font-size: 9.5px;
+    padding: 3px 8px;
+  }
+
+  .login-card-title {
+    font-size: 16px;
+  }
+
+  .login-card-subtitle {
+    font-size: 11.5px;
+  }
+
+  .login-landing-banner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .login-landing-banner-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 390px) {
+  .role-pills-row {
+    gap: 5px;
+  }
+
+  .role-pill-btn {
+    font-size: 11px;
+    padding: 7px 4px;
+    gap: 4px;
+  }
+
+  .role-pill-icon {
+    font-size: 12px;
+  }
+
+  .login-input-wrap {
+    height: 40px;
+    padding: 0 10px;
+  }
+
+  .login-submit-btn {
+    height: 42px;
+    font-size: 13.5px;
+  }
+}
+
 
 
 /* Notifications */
@@ -4335,14 +5004,6 @@ body.print-doctor-report .card {
 
   .history-card-content {
     grid-template-columns: repeat(2, minmax(0, 1fr))
-  }
-
-  .login-page {
-    grid-template-columns: minmax(360px, .95fr) minmax(0, 1.05fr)
-  }
-
-  .login-panel {
-    padding: 32px
   }
 }
 
@@ -4683,33 +5344,6 @@ body.print-doctor-report .card {
   .fee-row {
     flex-wrap: wrap;
     gap: 12px;
-  }
-
-  .login-page {
-    grid-template-columns: 1fr
-  }
-
-  .login-panel {
-    width: 100%;
-    min-height: 100vh;
-    padding: 26px 21px;
-    justify-content: flex-start
-  }
-
-  .login-brand {
-    margin-bottom: 38px
-  }
-
-  .login-panel h1 {
-    font-size: 40px
-  }
-
-  .login-photo {
-    display: none
-  }
-
-  .login-footnote {
-    margin-top: 18px
   }
 
   .modal-backdrop {
@@ -6412,4 +7046,4 @@ body {
 
 .past-visit-card .icon-button:hover {
   background: #E2E8F0;
-}
+}

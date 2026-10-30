@@ -9,7 +9,7 @@ import { Badge, statusTone } from '../../components/ui/Badge';
 import { Card, SectionHeading, StatCard } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { TablePagination, usePagination } from '../../components/ui/Pagination';
-import { PageHeading, PatientCell } from '../../components/shared/Primitives';
+import { PatientCell } from '../../components/shared/Primitives';
 
 export function DoctorDashboard({ department }: { department: Department }) {
   const { state } = useHospitalData();
@@ -27,21 +27,46 @@ export function DoctorDashboard({ department }: { department: Department }) {
   const rows = [...appointments].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   const { page, setPage, pageSize, setPageSize, pagedItems: pagedRows, total } = usePagination(rows, 5);
   const cards = [
-    { label: "Today's appointments", value: appointments.length, hint: 'Booked for today', icon: <CalendarDays size={16} /> },
-    { label: 'Waiting patients', value: waiting, hint: 'Ready for your review', icon: <Clock3 size={16} /> },
-    { label: 'In consultation', value: consulting, hint: 'Currently with a clinician', icon: <Activity size={16} /> },
-    { label: 'Completed visits', value: completed, hint: 'Visits completed today', icon: <CheckCheck size={16} /> },
+    { label: "Today's appointments", value: appointments.length, hint: 'Booked for today', icon: <CalendarDays size={16} />, tone: 'mint' as const },
+    { label: 'Waiting patients', value: waiting, hint: 'Ready for your review', icon: <Clock3 size={16} />, tone: 'purple' as const },
+    { label: 'In consultation', value: consulting, hint: 'Currently with a clinician', icon: <Activity size={16} />, tone: 'peach' as const },
+    { label: 'Completed visits', value: completed, hint: 'Visits completed today', icon: <CheckCheck size={16} />, tone: 'blue' as const },
   ];
+  const heroQuote = department === 'skin'
+    ? 'Healthy skin is a reflection of overall wellness and dedicated care.'
+    : 'Every step toward recovery is a step toward a better life.';
+  const heroImage = department === 'skin' ? '/images/skin-hero.png' : '/images/ortho-hero.png';
+
   return <>
-    <PageHeading
-      eyebrow={`${deptTitle} · Clinical workspace`}
-      title={`Welcome, ${doctorName}`}
-      description="Your appointments and patient work, in one place."
-      actions={<Button onClick={() => navigate(`/${department === 'skin' ? 'skin' : 'ortho'}/consultation`)} icon={<Users size={15} />}>Open consultation</Button>}
-    />
+    <div className={`clinical-hero-banner dept-${department}`}>
+      <div className="clinical-hero-main">
+        <div className="clinical-hero-eyebrow">{deptTitle.toUpperCase()} · CLINICAL WORKSPACE</div>
+        <h1 className="clinical-hero-title">Welcome back, {doctorName}</h1>
+        <p className="clinical-hero-desc">Your appointments and patient work, in one place.</p>
+        <div className="clinical-hero-action">
+          <Button
+            className="clinical-hero-btn"
+            onClick={() => navigate(`/${department === 'skin' ? 'skin' : 'ortho'}/consultation`)}
+            icon={<Users size={15} />}
+          >
+            Open consultation
+          </Button>
+        </div>
+      </div>
+
+      <div className={`clinical-hero-quote dept-${department}`}>
+        <span className="clinical-quote-mark" aria-hidden="true">“</span>
+        <p className="clinical-quote-text">{heroQuote}</p>
+      </div>
+
+      <div className={`clinical-hero-media dept-${department}${department === 'skin' ? ' is-skin' : ''}`} aria-hidden="true">
+        <img src={heroImage} alt="" className={`clinical-hero-img dept-${department}${department === 'skin' ? ' is-skin' : ''}`} />
+        <div className="clinical-hero-fade" />
+      </div>
+    </div>
     <div className="stats-grid">
       {cards.map((item) => <StatCard key={item.label} {...item} />)}
-      <StatCard label="Follow-ups due" value={due} hint="Due today or in two days" icon={<Users size={16} />} />
+      <StatCard label="Follow-ups due" value={due} hint="Due today or in two days" icon={<Users size={16} />} tone="teal" />
     </div>
 
     <div className="content-grid doctor-dashboard-grid">

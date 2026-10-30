@@ -8,7 +8,7 @@ import { useAuth } from '../../services/auth/AuthContext';
 import { money, timeLabel } from '../../utils/format';
 import { Badge, statusTone } from '../../components/ui/Badge';
 import { Card, SectionHeading, StatCard } from '../../components/ui/Card';
-import { PageHeading, PatientCell } from '../../components/shared/Primitives';
+import { PatientCell } from '../../components/shared/Primitives';
 import { Button } from '../../components/ui/Button';
 import { TablePagination, usePagination } from '../../components/ui/Pagination';
 
@@ -40,17 +40,42 @@ export function ReceptionDashboard() {
   const agenda = [...todayAppointments].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   const { page, setPage, pageSize, setPageSize, pagedItems: pagedAgenda, total: agendaTotal } = usePagination(agenda, 5);
   const metrics = [
-    { label: "Today's appointments", value: todayAppointments.length, hint: 'Across both departments', icon: <CalendarDays size={16} /> },
-    { label: 'Waiting patients', value: waiting.length, hint: 'Current waiting queue', icon: <Clock3 size={16} /> },
-    { label: 'Currently consulting', value: consulting.length, hint: 'Patients with a clinician', icon: <Activity size={16} /> },
-    { label: 'Completed visits', value: completed, hint: 'Queue visits marked complete', icon: <CheckCheck size={16} /> },
-    { label: "Today's collections", value: money(collections), hint: 'Recorded payments today', icon: <Wallet size={16} /> },
-    { label: 'Outstanding balances', value: money(outstanding), hint: 'Across open invoices', icon: <CreditCard size={16} /> },
-    { label: 'Follow-ups due soon', value: followUpsDue, hint: 'Due today or in the next two days', icon: <Users size={16} /> },
-    { label: 'Departments active', value: 2, hint: 'Skin and Orthopaedics', icon: <Activity size={16} /> },
+    { label: "Today's appointments", value: todayAppointments.length, hint: 'Across both departments', icon: <CalendarDays size={16} />, tone: 'mint' as const },
+    { label: 'Waiting patients', value: waiting.length, hint: 'Current waiting queue', icon: <Clock3 size={16} />, tone: 'purple' as const },
+    { label: 'Currently consulting', value: consulting.length, hint: 'Patients with a clinician', icon: <Activity size={16} />, tone: 'peach' as const },
+    { label: 'Completed visits', value: completed, hint: 'Queue visits marked complete', icon: <CheckCheck size={16} />, tone: 'blue' as const },
+    { label: "Today's collections", value: money(collections), hint: 'Recorded payments today', icon: <Wallet size={16} />, tone: 'teal' as const },
+    { label: 'Outstanding balances', value: money(outstanding), hint: 'Across open invoices', icon: <CreditCard size={16} />, tone: 'amber' as const },
+    { label: 'Follow-ups due soon', value: followUpsDue, hint: 'Due today or in the next two days', icon: <Users size={16} />, tone: 'indigo' as const },
+    { label: 'Departments active', value: 2, hint: 'Skin and Orthopaedics', icon: <Activity size={16} />, tone: 'rose' as const },
   ];
   return <>
-    <PageHeading eyebrow="Reception · Overview" title={`Welcome, ${user?.displayName || 'Reception'}`} description="A clear view of today’s appointments, queue and collections." actions={<Button onClick={() => navigate('/reception/queue')} icon={<Users size={15} />}>Add to queue</Button>} />
+    <div className="clinical-hero-banner dept-reception">
+      <div className="clinical-hero-main">
+        <div className="clinical-hero-eyebrow">RECEPTION · CARE OPERATIONS</div>
+        <h1 className="clinical-hero-title">Welcome, {user?.displayName || 'Reception'}</h1>
+        <p className="clinical-hero-desc">Today’s appointments, queue and collections at a glance.</p>
+        <div className="clinical-hero-action">
+          <Button
+            className="clinical-hero-btn"
+            onClick={() => navigate('/reception/queue')}
+            icon={<Users size={15} />}
+          >
+            Add to queue
+          </Button>
+        </div>
+      </div>
+
+      <div className="clinical-hero-quote dept-reception">
+        <span className="clinical-quote-mark" aria-hidden="true">“</span>
+        <p className="clinical-quote-text">Seamless care begins with a warm welcome and connected teams.</p>
+      </div>
+
+      <div className="clinical-hero-media dept-reception" aria-hidden="true">
+        <img src="/images/reception-hero.png" alt="" className="clinical-hero-img dept-reception" />
+        <div className="clinical-hero-fade" />
+      </div>
+    </div>
     <div className="stats-grid">{metrics.map((item) => <StatCard key={item.label} {...item} />)}</div>
     <div className="content-grid">
       <Card><SectionHeading title="Department activity" subtitle="Appointments scheduled across the last seven days" /><div className="chart-box"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData} margin={{ top: 5, right: 5, left: -18, bottom: 0 }}><CartesianGrid stroke="#EAF0F2" vertical={false} /><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 10 }} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 10 }} /><Tooltip contentStyle={{ borderRadius: 10, borderColor: '#DCE5E9', fontSize: 11 }} /><Bar dataKey="skin" name="Skin" fill="#177E89" radius={[5, 5, 0, 0]} /><Bar dataKey="orthopaedics" name="Orthopaedics" fill="#17324D" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer></div><div className="chart-legend"><span><i className="legend-dot" style={{ background: '#177E89' }} />Skin</span><span><i className="legend-dot" style={{ background: '#17324D' }} />Orthopaedics</span></div></Card>

@@ -74,7 +74,6 @@ export function AppShell() {
   const [query, setQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
-  const [photoFailed, setPhotoFailed] = useState(false);
   const links = navByRole[role];
   const title = useMemo(() => links.find((item) => location.pathname === item.to || (item.to.endsWith('/consultation') && location.pathname.startsWith(`${item.to}/`)))?.label ?? info.label, [info.label, links, location.pathname]);
 
@@ -163,11 +162,24 @@ export function AppShell() {
 
   return <div className={`app-shell${collapsed ? ' is-sidebar-collapsed' : ''}`}>
     <div className={`mobile-scrim${mobileOpen ? ' visible' : ''}`} onClick={() => setMobileOpen(false)} aria-hidden="true" />
-    <aside ref={sidebarRef} id="primary-navigation" className={`sidebar${collapsed ? ' collapsed' : ''}${mobileOpen ? ' mobile-open' : ''}`} role={mobileOpen ? 'dialog' : undefined} aria-modal={mobileOpen || undefined} aria-label={`${info.label} navigation`}>
+    <aside ref={sidebarRef} id="primary-navigation" className={`sidebar portal-${role}${collapsed ? ' collapsed' : ''}${mobileOpen ? ' mobile-open' : ''}`} role={mobileOpen ? 'dialog' : undefined} aria-modal={mobileOpen || undefined} aria-label={`${info.label} navigation`}>
       <div className="sidebar-brand"><span className="brand-mark"><img className="brand-logo" src="/tosh-icon-circle.png" alt="TOSH Foundation" /></span><div className="brand-copy"><div className="brand-text">TOSH Foundation</div><div className="brand-subtext">Care operations</div></div></div>
+      <div className="sidebar-bg-art" aria-hidden="true">
+        <img
+          src={role === 'skin' ? '/images/sidebar-skin.jpg' : role === 'reception' ? '/images/sidebar-reception.png' : '/images/sidebar-spine.png'}
+          alt=""
+          className={`sidebar-bg-img${role === 'skin' ? ' is-skin' : role === 'reception' ? ' is-reception' : ''}`}
+        />
+        <div className="sidebar-bg-overlay" />
+      </div>
       <div className="sidebar-photo" aria-hidden="true">
-        {!photoFailed && <img src="/images/clinic-sidebar.jpeg" alt="" onError={() => setPhotoFailed(true)} />}
-        <div className="sidebar-photo-copy"><span>{role === 'reception' ? 'Today at TOSH Foundation' : 'Department workspace'}</span><strong>{role === 'reception' ? 'Care, connected.' : info.label}</strong></div>
+        <img src="/images/clinic-sidebar.jpeg" alt="" />
+        <div className="sidebar-photo-copy">
+          <span>{role === 'reception' ? 'Today at TOSH Foundation' : 'Department workspace'}</span>
+          <strong className={role === 'skin' ? 'is-skin' : undefined}>
+            {role === 'reception' ? 'Care, connected.' : info.label}
+          </strong>
+        </div>
       </div>
       <nav className="sidebar-nav" aria-label="Main menu"><div className="nav-section-label">Workspace</div>{links.map((item) => {
         const Icon = item.icon;
@@ -175,7 +187,7 @@ export function AppShell() {
           <Icon size={17} strokeWidth={1.9} /><span className="nav-label">{item.label}</span>
         </NavLink>;
       })}</nav>
-      <div className="sidebar-footer"><div className="sidebar-profile"><span className="sidebar-avatar"><UserRound size={16} /></span><div className="sidebar-footer-text"><strong>{info.name}</strong><span>{info.identity}</span></div><button type="button" className="icon-button sidebar-logout-btn" aria-label="Log out" title="Log out" onClick={signOut}><LogOut size={15} /></button></div></div>
+      <div className="sidebar-footer"><div className="sidebar-profile"><span className="sidebar-avatar"><UserRound size={16} /></span><div className="sidebar-footer-text"><strong>{info.name}</strong><span>{role === 'orthopaedics' ? 'Orthopaedic department' : role === 'skin' ? 'Dermatology department' : info.identity}</span></div><button type="button" className="icon-button sidebar-logout-btn" aria-label="Log out" title="Log out" onClick={signOut}><LogOut size={15} /></button></div></div>
     </aside>
     <div className="main-column">
       <header className="topbar">
