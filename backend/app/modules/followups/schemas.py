@@ -39,4 +39,5 @@ class UpdateFollowUpRequest(CamelModel):
     status: FollowUpStatusLiteral | None = None
     date: str | None = None
     note: str | None = None
+    reminder_status: ReminderStatusLiteral | None = None
     reminder_action: Literal["queue", "send"] | None = None

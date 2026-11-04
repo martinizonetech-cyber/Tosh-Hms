@@ -6,6 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppException, ConflictException, ForbiddenException, NotFoundException
+from app.core.websocket import broadcast_event
 from app.core.tokens import next_display_id
 from app.db.session import get_db
 from app.modules.appointments.models import Appointment
@@ -197,6 +198,12 @@ async def create_appointment(
     await db.commit()
     await db.refresh(appointment)
 
+    await broadcast_event("APPOINTMENT_UPDATE", {
+        "action": "create",
+        "id": appointment.display_id,
+        "department": dept,
+    })
+
     return to_appointment_response(appointment, patient.display_id, doctor.display_name)
 
 
@@ -284,6 +291,13 @@ async def update_appointment(
 
     await db.commit()
     await db.refresh(appointment)
+
+    await broadcast_event("APPOINTMENT_UPDATE", {
+        "action": "update",
+        "id": appointment.display_id,
+        "status": appointment.status,
+        "department": appointment.department,
+    })
 
     pat_display_id = appointment.patient.display_id if appointment.patient else str(appointment.patient_id)
     doc_name = appointment.doctor.display_name if appointment.doctor else "Unknown Doctor"

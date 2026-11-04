@@ -1038,7 +1038,7 @@ function AddPaymentModal({
                 transition: 'all 0.15s ease',
               }}
             >
-              <Plus size={14} /> + Add Row
+              <Plus size={14} />  Add Row
             </button>
             <span style={{ fontSize: '12px', color: '#64748B' }}>
               {validItems.length} of {items.length} row{items.length === 1 ? '' : 's'} filled

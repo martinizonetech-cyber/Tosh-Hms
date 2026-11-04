@@ -46,7 +46,6 @@ export function DocumentsPanel({
   // Prepare reliable inline preview URL for PDFs (Blob URL avoids CORS & IDM interception)
   useEffect(() => {
     let active = true;
-    let createdUrl: string | null = null;
 
     if (!preview) {
       setPdfPreviewBlobUrl(null);
@@ -75,9 +74,6 @@ export function DocumentsPanel({
           if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
           return;
         }
-        if (url && url.startsWith('blob:')) {
-          createdUrl = url;
-        }
         setPdfPreviewBlobUrl(url);
         setPdfLoading(false);
       })
@@ -91,9 +87,6 @@ export function DocumentsPanel({
 
     return () => {
       active = false;
-      if (createdUrl) {
-        URL.revokeObjectURL(createdUrl);
-      }
     };
   }, [preview]);
 
@@ -534,19 +527,12 @@ export function DocumentsPanel({
                   </div>
                 )}
                 {pdfPreviewBlobUrl ? (
-                  <object
-                    data={pdfPreviewBlobUrl}
-                    type="application/pdf"
+                  <iframe
+                    src={pdfPreviewBlobUrl || resolveInlineDocumentUrl(preview)}
+                    title={preview.name}
                     className="document-preview-pdf"
                     style={{ width: '100%', height: '70vh', border: '1px solid var(--line)', borderRadius: 8, background: '#FFF' }}
-                  >
-                    <iframe
-                      className="document-preview-pdf"
-                      title={`Preview of ${preview.name}`}
-                      src={pdfPreviewBlobUrl}
-                      style={{ width: '100%', height: '100%', border: 'none', background: '#FFF' }}
-                    />
-                  </object>
+                  />
                 ) : !pdfLoading && (
                   <div
                     style={{

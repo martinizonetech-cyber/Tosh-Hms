@@ -125,6 +125,12 @@ export const resolveInlineDocumentUrl = (doc?: { url?: string; dataUrl?: string 
 };
 
 /**
+ * Global cache of generated PDF Blob URLs to prevent premature garbage collection
+ * or revocation while the user is actively viewing, zooming, or reloading the PDF document.
+ */
+const pdfBlobCache = new Map<string, string>();
+
+/**
  * Resolves a reliable local Blob URL for inline PDF previewing.
  * Converts base64 data URLs or fetches remote document bytes into a local Blob URL
  * (blob:http://localhost:3000/...), which ensures same-origin rendering in Chrome,
@@ -133,15 +139,38 @@ export const resolveInlineDocumentUrl = (doc?: { url?: string; dataUrl?: string 
 export const fetchPdfBlobUrl = async (doc?: { url?: string; dataUrl?: string; name?: string } | null): Promise<string> => {
   if (!doc) return '';
 
+  const cacheKey = (doc.dataUrl || doc.url || doc.name || '').trim();
+  if (cacheKey && pdfBlobCache.has(cacheKey)) {
+    const cached = pdfBlobCache.get(cacheKey);
+    if (cached) return cached;
+  }
+
+  const cacheAndReturn = (blobUrl: string): string => {
+    if (cacheKey && blobUrl) {
+      if (pdfBlobCache.size > 50) {
+        const oldestKey = pdfBlobCache.keys().next().value;
+        if (oldestKey) {
+          const oldUrl = pdfBlobCache.get(oldestKey);
+          pdfBlobCache.delete(oldestKey);
+          if (oldUrl && oldUrl.startsWith('blob:')) {
+            try { URL.revokeObjectURL(oldUrl); } catch {}
+          }
+        }
+      }
+      pdfBlobCache.set(cacheKey, blobUrl);
+    }
+    return blobUrl;
+  };
+
   // 1. Priority: Local dataUrl (already in memory from upload)
   if (doc.dataUrl) {
-    if (doc.dataUrl.startsWith('blob:')) return doc.dataUrl;
+    if (doc.dataUrl.startsWith('blob:')) return cacheAndReturn(doc.dataUrl);
     if (doc.dataUrl.startsWith('data:')) {
       try {
         const res = await fetch(doc.dataUrl);
         const blob = await res.blob();
         const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-        return URL.createObjectURL(pdfBlob);
+        return cacheAndReturn(URL.createObjectURL(pdfBlob));
       } catch {
         return doc.dataUrl;
       }
@@ -151,49 +180,60 @@ export const fetchPdfBlobUrl = async (doc?: { url?: string; dataUrl?: string; na
 
   const rawUrl = resolveDocumentUrl(doc);
   if (!rawUrl) return '';
-  if (rawUrl.startsWith('blob:')) return rawUrl;
+  if (rawUrl.startsWith('blob:')) return cacheAndReturn(rawUrl);
   if (rawUrl.startsWith('data:')) {
     try {
       const res = await fetch(rawUrl);
       const blob = await res.blob();
-      return URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      return cacheAndReturn(URL.createObjectURL(new Blob([blob], { type: 'application/pdf' })));
     } catch {
       return rawUrl;
     }
   }
 
-  // 2. Remote signed URL: Request with view suffix and anti-hijack headers
-  let requestUrl = rawUrl;
+  // 2. Fetch remote document bytes into a local Blob URL
+  const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('tosh_access_token') : null;
+  const headers: Record<string, string> = {
+    Accept: 'application/pdf, application/octet-stream, */*',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const urlsToTry: string[] = [];
   if (rawUrl.includes('/api/v1/documents/files/')) {
     const [base, query] = rawUrl.split('?');
     if (!base.endsWith('/view')) {
-      requestUrl = `${base}/view${query ? `?${query}` : ''}`;
+      urlsToTry.push(`${base}/view${query ? `?${query}` : ''}`);
+    }
+  }
+  urlsToTry.push(rawUrl);
+
+  for (const url of urlsToTry) {
+    try {
+      let res = await fetch(url, { headers, credentials: 'include' }).catch(() => null);
+      if (!res || !res.ok) {
+        res = await fetch(url, { headers: { Accept: 'application/pdf, */*' } }).catch(() => null);
+      }
+      if (!res || !res.ok) continue;
+
+      const cType = res.headers.get('content-type') || '';
+      if (cType.includes('application/json') || cType.includes('text/html')) {
+        continue;
+      }
+
+      const buffer = await res.arrayBuffer();
+      if (buffer.byteLength > 0) {
+        const pdfBlob = new Blob([buffer], { type: 'application/pdf' });
+        return cacheAndReturn(URL.createObjectURL(pdfBlob));
+      }
+    } catch {
+      // Continue to next candidate URL
     }
   }
 
-  try {
-    const headers = new Headers();
-    headers.set('X-Requested-With', 'XMLHttpRequest');
-    headers.set('Accept', 'application/pdf, */*');
-    const res = await fetch(requestUrl, { headers, credentials: 'include' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-    return URL.createObjectURL(pdfBlob);
-  } catch {
-    // Retry with rawUrl directly
-    try {
-      const res = await fetch(rawUrl, {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      return URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-    } catch {
-      return resolveInlineDocumentUrl(doc);
-    }
-  }
+  // Fallback to inline document URL (with full RFC 7233 range support on backend)
+  return resolveInlineDocumentUrl(doc);
 };
 
 export const downloadFile = async (url: string, filename: string): Promise<void> => {

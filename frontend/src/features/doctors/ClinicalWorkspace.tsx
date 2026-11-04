@@ -5,7 +5,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Consultation, Department, PrescriptionItem } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';
 import { useToast } from '../../components/ui/Toast';
-import { dateLabel, departmentLabel, getAge, resolveDocumentUrl } from '../../utils/format';
+import { dateLabel, departmentLabel, getAge, money, resolveDocumentUrl } from '../../utils/format';
 import { PageHeading, PatientAvatar } from '../../components/shared/Primitives';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -48,16 +48,16 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
 
   // If doctor specifically clicked "Open visit" with a visitId in query string
   const explicitVisit = explicitVisitId
-    ? state.consultations.find((v) => v.id === explicitVisitId && v.patientId === selectedPatientId)
+    ? state.consultations.find((v) => v.id === explicitVisitId && v.patientId === selectedPatientId && v.department === department)
     : undefined;
 
   // In-progress draft for this patient in this department (if any)
   const existingDraft = activeQueue?.visitId
-    ? state.consultations.find((v) => v.id === activeQueue.visitId && v.status === 'Draft')
+    ? state.consultations.find((v) => v.id === activeQueue.visitId && v.department === department && v.status === 'Draft')
     : state.consultations.find((c) => c.patientId === selectedPatientId && c.department === department && c.status === 'Draft');
 
   // Visit link integrity check
-  const visitLinkMismatch = Boolean(explicitVisitId && !explicitVisit && state.consultations.some((v) => v.id === explicitVisitId && v.patientId !== selectedPatientId));
+  const visitLinkMismatch = Boolean(explicitVisitId && !explicitVisit && state.consultations.some((v) => v.id === explicitVisitId && (v.patientId !== selectedPatientId || v.department !== department)));
 
   // Resolved active consultation:
   // - If explicit historical visit requested: open it
@@ -96,13 +96,13 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
   const [conflictError, setConflictError] = useState(false);
   const [isLocked, setIsLocked] = useState(clinical.status === 'Finalized');
 
-  // All previous finalized visits for this patient
+  // All previous finalized visits for this patient in this doctor department
   const previousVisits = useMemo(() => {
     if (!patient) return [];
     return state.consultations
-      .filter((v) => v.patientId === patient.id && v.id !== clinical.id && v.status === 'Finalized')
+      .filter((v) => v.patientId === patient.id && v.department === department && v.id !== clinical.id && v.status === 'Finalized')
       .sort((a, b) => b.visitedAt.localeCompare(a.visitedAt));
-  }, [state.consultations, patient?.id, clinical.id]);
+  }, [state.consultations, patient?.id, clinical.id, department]);
 
   useEffect(() => {
     if (patient && savedVisit) {
@@ -129,16 +129,44 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
     }
   }, [selectedPatientId, savedVisit?.id, explicitVisitId]);
 
+  // Synchronize documents and prescription images whenever state.consultations updates
+  useEffect(() => {
+    if (!clinical.id || clinical.id.startsWith('DRAFT-')) return;
+    const currentInState = state.consultations.find((c) => c.id === clinical.id);
+    if (currentInState) {
+      setClinical((prev) => {
+        const docsDiffer = JSON.stringify(prev.documents || []) !== JSON.stringify(currentInState.documents || []);
+        const rxImagesDiffer = JSON.stringify(prev.prescriptionImages || []) !== JSON.stringify(currentInState.prescriptionImages || []);
+        if (docsDiffer || rxImagesDiffer) {
+          return {
+            ...prev,
+            documents: currentInState.documents || [],
+            prescriptionImages: currentInState.prescriptionImages || [],
+          };
+        }
+        return prev;
+      });
+    }
+  }, [state.consultations, clinical.id]);
+
   if (visitLinkMismatch) return <><PageHeading eyebrow={`${departmentLabel(department)} · Visit integrity`} title="Visit link needs review" description="No consultation from another patient or department was opened." /><Card><EmptyState title="Visit ID does not match this patient" message="The queue entry has an invalid visit ID or points to a consultation assigned to a different patient or department." icon={<ClipboardList size={18} />} /></Card></>;
   if (!patient || !selectedPatientId) return <><PageHeading eyebrow={`${departmentLabel(department)} · Consultation`} title="Consultation workspace" description="Select a patient to begin a clinical record." /><Card><EmptyState title="No department patients yet" message="Register or schedule a patient from Reception to start a consultation." icon={<Stethoscope size={18} />} action={<Button onClick={() => navigate('/reception/patients')}>Open patient directory</Button>} /></Card></>;
 
   const patch = (update: Partial<Consultation>) => {
-    if (isLocked) {
+    const isDocOnlyUpdate = Boolean(
+      (update.documents !== undefined || update.prescriptionImages !== undefined) &&
+      update.symptoms === undefined &&
+      update.examination === undefined &&
+      update.diagnosis === undefined &&
+      update.prescription === undefined &&
+      update.treatmentPlan === undefined
+    );
+    if (isLocked && !isDocOnlyUpdate) {
       toast.push('This consultation is finalized and locked. Click "Reopen consultation" above to make changes.', 'info');
       return;
     }
     setClinical((current) => ({ ...current, ...update }));
-    setDirty(true);
+    if (!isLocked && !isDocOnlyUpdate) setDirty(true);
   };
 
   const save = async (status: Consultation['status'] = clinical.status) => {
@@ -154,6 +182,9 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
       setDirty(false);
       setConflictError(false);
       toast.push(status === 'Finalized' ? 'Consultation finalized.' : 'Consultation draft saved.', 'success');
+      if (status === 'Finalized') {
+        navigate(`/${role}/patients`);
+      }
     } catch (error: any) {
       if (error?.status === 409) {
         if (error?.code === 'VISIT_LOCKED') {
@@ -239,7 +270,7 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
             <div className="profile-info"><span>Age / gender</span><strong>{getAge(patient.dateOfBirth) ?? '—'} years · {patient.gender}</strong></div>
             <div className="profile-info"><span>Phone</span><strong>{patient.phone}</strong></div>
             <div className="profile-info"><span>Department</span><strong>{departmentLabel(department)}</strong></div>
-            <div className="profile-info"><span>Latest visit</span><strong>{patient.latestVisitAt ? formatDistanceToNow(new Date(patient.latestVisitAt), { addSuffix: true }) : 'First visit'}</strong></div>
+            <div className="profile-info"><span>Latest visit</span><strong>{previousVisits[0]?.visitedAt ? formatDistanceToNow(new Date(previousVisits[0].visitedAt), { addSuffix: true }) : 'First visit'}</strong></div>
           </div>
 
           {previousVisits.length > 0 && (
@@ -396,28 +427,51 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
               onChange={patch}
               previousVisits={previousVisits}
               onCopyPrescription={handleCopyPrescription}
+              patient={patient}
             />
           )}
           {tab === 'Prescription' && <PrescriptionPanel consultation={clinical} onChange={patch} onPrint={() => print('prescription')} department={department} />}
-          {tab === 'Documents' && <DocumentsPanel patientId={patient.id} department={department} documents={clinical.documents} onChange={(documents) => patch({ documents })} visitId={clinical.id} />}
+          {tab === 'Documents' && (
+            <DocumentsPanel
+              patientId={patient.id}
+              department={department}
+              documents={clinical.documents}
+              onChange={(documents) => {
+                const rxDocs = documents.filter((d) => (d.category || '').toLowerCase() === 'prescription');
+                patch({
+                  documents,
+                  prescriptionImages: rxDocs.map((d) => ({
+                    id: d.id,
+                    name: d.name,
+                    mimeType: d.mimeType,
+                    size: d.size,
+                    uploadedAt: d.uploadedAt,
+                    url: d.url,
+                    dataUrl: d.dataUrl,
+                  })),
+                });
+              }}
+              visitId={clinical.id}
+            />
+          )}
           {tab === 'Procedures' && <ProceduresPanel patientId={patient.id} department={department} consultation={clinical} onChange={patch} />}
           {tab === 'Follow-up' && <DoctorFollowUpPanel patientId={patient.id} department={department} doctor={doctorNames[department]} consultation={clinical} onChange={patch} />}
         </TabPanel>
-        <div className="clinical-bottom-actions"><span className="field-hint">Saved in clinic database · consultation records locked once finalized.</span><div className="button-row"><Button variant="secondary" onClick={() => save('Draft')} disabled={isLocked} icon={<Save size={14} />}>Save draft</Button><Button onClick={() => save('Finalized')} disabled={isLocked} icon={<CheckCheck size={14} />}>Save as finalized</Button></div></div>
+        <div className="clinical-bottom-actions"><span className="field-hint">Saved in clinic database · consultation records locked once finalized.</span><div className="button-row"><Button variant="secondary" onClick={() => save('Draft')} disabled={isLocked} icon={<Save size={14} />}>Save draft</Button><Button onClick={() => { if (window.confirm('Finalize this consultation?')) save('Finalized'); }} disabled={isLocked} icon={<CheckCheck size={14} />}>Save as finalized</Button></div></div>
       </section>
     </div>
     {/* Printable Consultation Summary Sheet */}
     <section className="print-sheet clinical-print-sheet" aria-label="Printable consultation summary">
       <PrintLetterhead
         department={department}
-        documentTitle="OUTPATIENT CONSULTATION SUMMARY & CASE RECORD"
-        documentSubTitle="Official Clinical Record · TOSH Foundation"
+        documentTitle="OUTPATIENT CONSULTATION CASE STUDY & CLINICAL RECORD"
+        documentSubTitle="Official Clinical Consultation & Case Record · TOSH Foundation"
       />
       <PrintPatientMeta
         patient={patient}
         visitedAt={clinical.visitedAt}
         doctorName={doctorNames[department]}
-        tokenOrVisitLabel="OPD Consultation Record"
+        tokenOrVisitLabel={`Visit ${clinical.id}${activeQueue?.token ? ` · Token ${activeQueue.token}` : ''} · ${clinical.status}`}
       />
 
       {clinical.diagnosis && (
@@ -482,10 +536,62 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
         )}
       </div>
 
-      {clinical.prescription.length > 0 && (
+
+
+      {clinical.procedures && clinical.procedures.length > 0 && (
         <div className="print-block print-no-break" style={{ marginTop: 14 }}>
-          <div className="print-block-heading">Prescribed Medications (Rx)</div>
-          <PrintRxTable items={clinical.prescription} />
+          <div className="print-block-heading">Procedures & Clinical Interventions Performed</div>
+          <table className="print-procedures-table">
+            <thead>
+              <tr>
+                <th style={{ width: '6%', textAlign: 'center' }}>#</th>
+                <th style={{ width: '54%' }}>Procedure / Intervention</th>
+                <th style={{ width: '22%' }}>Performing Clinician</th>
+                <th style={{ width: '18%', textAlign: 'right' }}>Charges</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clinical.procedures.map((proc, idx) => (
+                <tr key={proc.id || idx}>
+                  <td className="print-cell-center">{idx + 1}</td>
+                  <td>
+                    <strong>{proc.description}</strong>
+                    {proc.createdAt && <span className="print-med-sub">{dateLabel(proc.createdAt, 'd MMM yyyy')}</span>}
+                  </td>
+                  <td>{proc.addedBy || doctorNames[department]}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{money(proc.amount)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700 }}>Total Clinical Procedure Charges:</td>
+                <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--teal)' }}>
+                  {money(clinical.procedures.reduce((acc, p) => acc + (p.amount || 0), 0))}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {clinical.documents && clinical.documents.length > 0 && (
+        <div className="print-block print-no-break" style={{ marginTop: 14 }}>
+          <div className="print-block-heading">Attached Diagnostic Documents & Medical Imaging ({clinical.documents.length})</div>
+          <div className="print-documents-grid">
+            {clinical.documents.map((doc, idx) => (
+              <div key={doc.id || idx} className="print-document-tile">
+                <strong>{doc.name}</strong>
+                <span>Category: {doc.category || 'Diagnostic'} · {doc.uploadedAt ? dateLabel(doc.uploadedAt, 'd MMM yyyy') : ''}</span>
+                {doc.size ? <span>Size: {(doc.size / 1024).toFixed(0)} KB</span> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {clinical.followUpDate && (
+        <div className="print-followup-banner print-no-break" style={{ marginTop: 14 }}>
+          <span className="print-followup-label">Next Follow-Up / Review:</span>
+          <strong className="print-followup-value">{dateLabel(clinical.followUpDate, 'EEEE, d MMMM yyyy')}</strong>
         </div>
       )}
 
@@ -507,7 +613,7 @@ export function ClinicalWorkspace({ department }: { department: Department }) {
         patient={patient}
         visitedAt={clinical.visitedAt}
         doctorName={doctorNames[department]}
-        tokenOrVisitLabel="Medical Prescription (Rx)"
+        tokenOrVisitLabel={`Visit ${clinical.id}${activeQueue?.token ? ` · Token ${activeQueue.token}` : ''} · Medical Prescription (Rx)`}
       />
 
       {clinical.diagnosis && (

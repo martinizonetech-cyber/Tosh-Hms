@@ -171,9 +171,13 @@ export function DoctorDashboard({ department }: { department: Department }) {
             subtitle="Upcoming clinical review dates"
             action={<Button variant="ghost" size="small" onClick={() => navigate(`/${department === 'skin' ? 'skin' : 'ortho'}/follow-ups`)} icon={<ArrowRight size={13} />}>View all</Button>}
           />
-          {state.followUps.filter((item) => item.department === department).length > 0 ? (
+          {state.followUps.filter((item) => item.department === department && item.status !== 'Completed' && item.status !== 'Cancelled').length > 0 ? (
             <div className="dashboard-card-list">
-              {state.followUps.filter((item) => item.department === department).slice(0, 4).map((item) => {
+              {state.followUps
+                .filter((item) => item.department === department && item.status !== 'Completed' && item.status !== 'Cancelled')
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .slice(0, 5)
+                .map((item) => {
                 const patient = state.patients.find((person) => person.id === item.patientId);
                 return (
                   <div className="dashboard-followup-card" key={item.id}>

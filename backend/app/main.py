@@ -17,19 +17,23 @@ from app.core.errors import (
     validation_exception_handler,
 )
 from app.core.logging import logger, setup_logging
-from app.db.session import engine
+from app.db import session as db_session
+from app.db.init_db import init_database
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging(debug=settings.DEBUG)
     logger.info("application_starting", env=settings.ENVIRONMENT, app_name=settings.APP_NAME)
+    print("\n[INFO] Initializing database tables and clinical seed data...")
+    await init_database()
+    print("[SUCCESS] Tosh Clinic HMS backend ready!\n")
     from app.services.scheduler import shutdown_scheduler, start_scheduler
     start_scheduler()
     yield
     logger.info("application_shutting_down")
     shutdown_scheduler()
-    await engine.dispose()
+    await db_session.engine.dispose()
 
 
 # In production, disable Swagger UI and OpenAPI schemas
@@ -51,7 +55,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:[0-9]+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,21 +69,30 @@ MAX_BODY_SIZE = 30 * 1024 * 1024  # 30 MB
 
 def _attach_cors_headers(request: Request, response: Response) -> Response:
     origin = request.headers.get("origin")
+    for h in ("Access-Control-Allow-Origin", "access-control-allow-origin"):
+        if h in response.headers:
+            del response.headers[h]
+    for h in ("Access-Control-Allow-Credentials", "access-control-allow-credentials"):
+        if h in response.headers:
+            del response.headers[h]
+
     if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["access-control-allow-origin"] = origin
+        response.headers["access-control-allow-credentials"] = "true"
         req_headers = request.headers.get("access-control-request-headers")
         if req_headers:
-            response.headers["Access-Control-Allow-Headers"] = req_headers
-        elif "Access-Control-Allow-Headers" not in response.headers:
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, X-Request-ID, X-Requested-With"
-        if "Access-Control-Allow-Methods" not in response.headers:
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
+            response.headers["access-control-allow-headers"] = req_headers
+        elif "access-control-allow-headers" not in response.headers:
+            response.headers["access-control-allow-headers"] = "Content-Type, Authorization, Accept, X-Request-ID, X-Requested-With, Range"
+        if "access-control-allow-methods" not in response.headers:
+            response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
     else:
         # Crucial for iframe/embed/object subresource requests where Origin header is omitted by browser
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, X-Request-ID, X-Requested-With"
+        response.headers["access-control-allow-origin"] = "*"
+        if "access-control-allow-methods" not in response.headers:
+            response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
+        if "access-control-allow-headers" not in response.headers:
+            response.headers["access-control-allow-headers"] = "Content-Type, Authorization, Accept, X-Request-ID, X-Requested-With, Range"
     return response
 
 
@@ -103,7 +116,8 @@ async def request_size_limit_middleware(request: Request, call_next):
 @app.middleware("http")
 async def security_and_request_id_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
-        return await call_next(request)
+        res = await call_next(request)
+        return _attach_cors_headers(request, res)
 
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.request_id = request_id
@@ -177,6 +191,25 @@ async def health():
     }
 
 
+from fastapi import WebSocket, WebSocketDisconnect
+from app.core.websocket import ws_manager, broadcast_event
+
+
+@app.websocket("/api/v1/ws")
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        await ws_manager.disconnect(websocket)
+
+
 from app.db.session import async_session_factory
 
 
@@ -234,3 +267,9 @@ api_v1_router.include_router(followups_router)
 api_v1_router.include_router(reports_router)
 
 app.include_router(api_v1_router)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
+

@@ -5,11 +5,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppException, ForbiddenException, NotFoundException, UnauthenticatedException
 from app.core.tokens import next_display_id
+from app.core.websocket import broadcast_event
 from app.db.session import get_db
 from app.modules.audit.service import log_audit_event
 from app.modules.auth.dependencies import get_current_user, require_role
@@ -147,6 +148,17 @@ async def upload_document(
         if v:
             resolved_visit_id = v.id
 
+    # If clinician uploads without a resolved visit, auto-link to active or latest visit in their department
+    if not resolved_visit_id and current_user.role in ("skin", "orthopaedics"):
+        v_active_stmt = (
+            select(Visit)
+            .where(Visit.patient_id == patient.id, Visit.department == current_user.role)
+            .order_by(Visit.started_at.desc())
+        )
+        v_active = (await db.execute(v_active_stmt)).scalars().first()
+        if v_active:
+            resolved_visit_id = v_active.id
+
     display_id = await next_display_id(db, Document, "DOC")
 
     raw_name = name or doc_name_alt
@@ -188,6 +200,9 @@ async def upload_document(
     await db.commit()
     await db.refresh(doc)
 
+    await broadcast_event("document:created", {"document_id": doc.display_id, "patient_id": patient.display_id, "visit_id": str(doc.visit_id) if doc.visit_id else None})
+    await broadcast_event("visit:updated", {"patient_id": patient.display_id, "visit_id": str(doc.visit_id) if doc.visit_id else None})
+
     signed_url = storage_service.get_signed_url(doc.storage_key)
     return to_document_response(doc, signed_url, patient_display_id=patient.display_id)
 
@@ -214,7 +229,29 @@ async def list_patient_documents(
         if depts and current_user.role not in depts:
             raise ForbiddenException("Clinicians cannot view documents for patients of other departments.")
 
-    stmt = select(Document).where(Document.patient_id == patient.id, Document.deleted_at.is_(None))
+    stmt = (
+        select(Document)
+        .outerjoin(Visit, Document.visit_id == Visit.id)
+        .outerjoin(User, Document.uploaded_by == User.id)
+        .where(Document.patient_id == patient.id, Document.deleted_at.is_(None))
+    )
+
+    if current_user.role in ("skin", "orthopaedics"):
+        # Strictly isolate: clinicians only see documents belonging to their own department
+        stmt = stmt.where(
+            or_(
+                Visit.department == current_user.role,
+                and_(
+                    Document.visit_id.is_(None),
+                    or_(
+                        User.role == current_user.role,
+                        User.department == current_user.role,
+                        Document.uploaded_by == current_user.id,
+                    ),
+                ),
+            )
+        )
+
     if category:
         stmt = stmt.where(Document.category == category)
 
@@ -263,13 +300,18 @@ async def delete_document(
     if not doc:
         return {"message": "Document deleted successfully."}
 
-    # Department guard (uploader can always delete their own document)
+    # Department guard: clinicians can only delete documents belonging to their own department
     if current_user.role in ("skin", "orthopaedics") and doc.uploaded_by != current_user.id:
-        vis_stmt = select(Visit.department).where(Visit.patient_id == doc.patient_id).distinct()
-        vis_res = await db.execute(vis_stmt)
-        depts = list(vis_res.scalars().all())
-        if depts and current_user.role not in depts:
-            raise ForbiddenException("Clinicians cannot delete documents for other departments.")
+        doc_dept = None
+        if doc.visit_id:
+            v_res = await db.execute(select(Visit.department).where(Visit.id == doc.visit_id))
+            doc_dept = v_res.scalar_one_or_none()
+        elif doc.uploaded_by:
+            u_res = await db.execute(select(User.role).where(User.id == doc.uploaded_by))
+            doc_dept = u_res.scalar_one_or_none()
+
+        if doc_dept and doc_dept != current_user.role:
+            raise ForbiddenException("Clinicians cannot delete documents belonging to another department.")
 
     doc.deleted_at = datetime.now(UTC)
 
@@ -286,6 +328,9 @@ async def delete_document(
     )
     await db.commit()
 
+    await broadcast_event("document:deleted", {"document_id": doc.display_id, "patient_id": str(doc.patient_id), "visit_id": str(doc.visit_id) if doc.visit_id else None})
+    await broadcast_event("visit:updated", {"patient_id": str(doc.patient_id), "visit_id": str(doc.visit_id) if doc.visit_id else None})
+
     return {"message": "Document deleted successfully."}
 
 
@@ -301,13 +346,18 @@ async def rename_document(
     if not doc:
         raise NotFoundException(f"Document with ID {document_id} not found.")
 
-    # Department guard
-    if current_user.role in ("skin", "orthopaedics"):
-        vis_stmt = select(Visit.department).where(Visit.patient_id == doc.patient_id).distinct()
-        vis_res = await db.execute(vis_stmt)
-        depts = list(vis_res.scalars().all())
-        if depts and current_user.role not in depts:
-            raise ForbiddenException("Clinicians cannot rename documents for other departments.")
+    # Department guard: clinicians can only rename documents belonging to their own department
+    if current_user.role in ("skin", "orthopaedics") and doc.uploaded_by != current_user.id:
+        doc_dept = None
+        if doc.visit_id:
+            v_res = await db.execute(select(Visit.department).where(Visit.id == doc.visit_id))
+            doc_dept = v_res.scalar_one_or_none()
+        elif doc.uploaded_by:
+            u_res = await db.execute(select(User.role).where(User.id == doc.uploaded_by))
+            doc_dept = u_res.scalar_one_or_none()
+
+        if doc_dept and doc_dept != current_user.role:
+            raise ForbiddenException("Clinicians cannot rename documents belonging to another department.")
 
     target_name = (payload.name or payload.doc_name or payload.new_name or "").strip()
     if not target_name:
@@ -337,6 +387,9 @@ async def rename_document(
     await db.commit()
     await db.refresh(doc)
 
+    await broadcast_event("document:updated", {"document_id": doc.display_id, "name": doc.name, "patient_id": str(doc.patient_id), "visit_id": str(doc.visit_id) if doc.visit_id else None})
+    await broadcast_event("visit:updated", {"patient_id": str(doc.patient_id), "visit_id": str(doc.visit_id) if doc.visit_id else None})
+
     storage_service = get_storage_service()
     signed_url = storage_service.get_signed_url(doc.storage_key)
     return to_document_response(doc, signed_url)
@@ -347,41 +400,157 @@ async def rename_document(
 @router.get("/documents/files/{key}", summary="Download document file via signed URL")
 async def get_document_file(
     key: str,
-    expires: int = Query(...),
-    sig: str = Query(...),
+    request: Request,
+    expires: int | None = Query(default=None),
+    sig: str | None = Query(default=None),
+    token: str | None = Query(default=None),
     download: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
 ) -> Response:
+    clean_key = Path(key).name
     storage = get_storage_service()
-    if isinstance(storage, LocalStorageService):
-        if not storage.verify_signed_url(key, expires, sig):
-            raise UnauthenticatedException("Signed URL has expired or has an invalid signature.")
-        try:
-            data, content_type = await storage.get_object(key)
-        except FileNotFoundError:
-            raise NotFoundException(f"Document file {key} not found on server.")
-    else:
-        # S3 pre-signed URLs are handled by S3 directly
-        try:
-            data, content_type = await storage.get_object(key)
-        except Exception:
-            raise NotFoundException(f"Document file {key} not found on server.")
 
-    filename = Path(key).name
+    # 1. Authorize via signed URL or token
+    authorized = False
+    if expires is not None and sig is not None:
+        if isinstance(storage, LocalStorageService):
+            if storage.verify_signed_url(clean_key, expires, sig):
+                authorized = True
+        else:
+            authorized = True
+
+    if not authorized:
+        # Check Bearer token in header or query parameter
+        auth_header = request.headers.get("Authorization") or ""
+        raw_token = token
+        if auth_header.startswith("Bearer "):
+            raw_token = auth_header[7:].strip()
+        if raw_token:
+            from app.core.security import decode_access_token
+            try:
+                payload = decode_access_token(raw_token)
+                if payload and "sub" in payload:
+                    authorized = True
+            except Exception:
+                pass
+
+    if not authorized:
+        raise UnauthenticatedException("Signed URL has expired or has an invalid signature.")
+
+    # Department guard for clinicians accessing files
+    caller_role = None
+    auth_header = request.headers.get("Authorization") or ""
+    raw_tok = token or (auth_header[7:].strip() if auth_header.startswith("Bearer ") else None)
+    if raw_tok:
+        from app.core.security import decode_access_token
+        try:
+            tok_payload = decode_access_token(raw_tok)
+            if tok_payload:
+                caller_role = tok_payload.get("role")
+        except Exception:
+            pass
+
+    if caller_role in ("skin", "orthopaedics"):
+        doc_chk_stmt = (
+            select(Document)
+            .where(Document.storage_key == clean_key, Document.deleted_at.is_(None))
+        )
+        doc_chk = (await db.execute(doc_chk_stmt)).scalar_one_or_none()
+        if doc_chk:
+            doc_dept = None
+            if doc_chk.visit_id:
+                v_res = await db.execute(select(Visit.department).where(Visit.id == doc_chk.visit_id))
+                doc_dept = v_res.scalar_one_or_none()
+            elif doc_chk.uploaded_by:
+                u_res = await db.execute(select(User.role).where(User.id == doc_chk.uploaded_by))
+                doc_dept = u_res.scalar_one_or_none()
+
+            if doc_dept and doc_dept != caller_role:
+                raise ForbiddenException("Clinicians cannot access documents belonging to another department.")
+
+    # 2. Retrieve document bytes
+    try:
+        data, content_type = await storage.get_object(clean_key)
+    except FileNotFoundError:
+        raise NotFoundException(f"Document file {clean_key} not found on server.")
+    except Exception:
+        raise NotFoundException(f"Document file {clean_key} could not be retrieved.")
+
+    filename = clean_key
     if not filename.endswith((".pdf", ".png", ".jpg", ".jpeg", ".webp")) and content_type == "application/pdf":
         filename = f"{filename}.pdf"
 
-    headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Request-ID, X-Requested-With, Range",
-        "Access-Control-Expose-Headers": "Content-Disposition, Content-Length, Content-Type, Accept-Ranges",
-        "Cross-Origin-Resource-Policy": "cross-origin",
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(len(data)),
-    }
-    if download:
-        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    else:
-        headers["Content-Disposition"] = f'inline; filename="{filename}"'
+    file_size = len(data)
+    disposition = "attachment" if download else "inline"
+    content_disposition = f'{disposition}; filename="{filename}"'
 
-    return Response(content=data, media_type=content_type, headers=headers)
+    base_headers = {
+        "Content-Disposition": content_disposition,
+        "Accept-Ranges": "bytes",
+        "Cross-Origin-Resource-Policy": "cross-origin",
+        "Access-Control-Expose-Headers": "Content-Disposition, Content-Length, Content-Type, Content-Range, Accept-Ranges",
+    }
+
+    # 3. HTTP Range requests (RFC 7233) for streaming PDF rendering in Chrome / Edge / Firefox
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    if range_header and range_header.strip().lower().startswith("bytes="):
+        range_val = range_header.strip()[6:].strip()
+        try:
+            if "," in range_val:
+                range_val = range_val.split(",")[0].strip()
+            parts = range_val.split("-", 1)
+            start_str, end_str = parts[0].strip(), parts[1].strip()
+
+            if start_str and end_str:
+                start = int(start_str)
+                end = int(end_str)
+            elif start_str:
+                start = int(start_str)
+                end = file_size - 1
+            elif end_str:
+                suffix_len = int(end_str)
+                start = max(0, file_size - suffix_len)
+                end = file_size - 1
+            else:
+                start = 0
+                end = file_size - 1
+
+            if start < 0 or start >= file_size or end < start:
+                return Response(
+                    status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
+                    headers={
+                        "Content-Range": f"bytes */{file_size}",
+                        **base_headers,
+                    },
+                )
+
+            end = min(end, file_size - 1)
+            content_length = end - start + 1
+            sliced_data = data[start:end + 1]
+
+            range_headers = {
+                **base_headers,
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Content-Length": str(content_length),
+            }
+
+            return Response(
+                content=sliced_data,
+                status_code=status.HTTP_206_PARTIAL_CONTENT,
+                media_type=content_type,
+                headers=range_headers,
+            )
+        except (ValueError, IndexError):
+            pass
+
+    # 4. Standard 200 OK full response
+    full_headers = {
+        **base_headers,
+        "Content-Length": str(file_size),
+    }
+    return Response(
+        content=data,
+        status_code=status.HTTP_200_OK,
+        media_type=content_type,
+        headers=full_headers,
+    )

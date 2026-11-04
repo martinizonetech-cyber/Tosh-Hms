@@ -27,6 +27,16 @@ class AppException(Exception):
         self.details = details
 
 
+class BadRequestException(AppException):
+    def __init__(self, message: str = "Bad request", details: Any | None = None):
+        super().__init__(
+            message=message,
+            code="BAD_REQUEST",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=details,
+        )
+
+
 class UnauthenticatedException(AppException):
     def __init__(self, message: str = "Authentication required", details: Any | None = None):
         super().__init__(

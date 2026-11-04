@@ -1,5 +1,5 @@
 import type { Appointment, ChargeItem, Consultation, Department, FollowUp, Invoice, NewAppointmentInput, NewFollowUpInput, Patient, PatientDocument, PatientDraft, Payment, QueueEntry } from '../../types/domain';
-import type { AppointmentSearchParams, CreateAppointmentRequest, CreateFollowUpRequest, CreatePatientRequest, CreateQueueRequest, CreateVisitChargeRequest, DocumentSearchParams, FollowUpSearchParams, InvoiceSearchParams, PaginatedResponse, PatientSearchParams, QueueSearchParams, RecordPaymentRequest, ReportSummary, ReportSummaryRequest, SaveConsultationRequest, UpdateFollowUpRequest, UpdateQueueRequest } from './contracts';
+import type { AppointmentSearchParams, CreateAppointmentRequest, CreateFollowUpRequest, CreatePatientRequest, CreateQueueRequest, CreateVisitChargeRequest, DocumentSearchParams, FollowUpSearchParams, InvoiceSearchParams, PaginatedResponse, PatientSearchParams, QueueSearchParams, RecordPaymentRequest, ReportSummary, ReportSummaryRequest, SaveConsultationRequest, UpdateFollowUpRequest, UpdatePatientRequest, UpdateQueueRequest } from './contracts';
 import type { HospitalRepository } from '../repositories/types';
 import { requestJson } from './httpClient';
 
@@ -22,6 +22,7 @@ export interface ApiRepository extends HospitalRepository {
 export const hospitalApi: ApiRepository = {
   listPatients(params: PatientSearchParams = {}) { return requestJson<PaginatedResponse<Patient>>(`/patients${queryString(params)}`); },
   createPatient(input: PatientDraft & { department: Department }) { const body: CreatePatientRequest = input; return requestJson<Patient>('/patients', { method: 'POST', body: JSON.stringify(body) }); },
+  updatePatient(id: string, patch: UpdatePatientRequest) { return requestJson<Patient>(`/patients/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }); },
   listAppointments(params: AppointmentSearchParams = {}) { return requestJson<PaginatedResponse<Appointment>>(`/appointments${queryString(params)}`); },
   scheduleAppointment(input: NewAppointmentInput) { const body: CreateAppointmentRequest = input; return requestJson<Appointment>('/appointments', { method: 'POST', body: JSON.stringify(body) }); },
   updateAppointment(id: string, patch: Partial<Appointment>) { return requestJson<Appointment>(`/appointments/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }); },

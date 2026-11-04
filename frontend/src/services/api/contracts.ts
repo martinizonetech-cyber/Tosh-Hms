@@ -1,4 +1,4 @@
-import type { Appointment, ChargeItem, Consultation, Department, FollowUp, Invoice, NewAppointmentInput, NewFollowUpInput, NewQueueInput, Patient, PatientDocument, PatientDraft, Payment, QueueEntry } from '../../types/domain';
+import type { Appointment, ChargeItem, Consultation, Department, FollowUp, Invoice, NewAppointmentInput, NewFollowUpInput, NewQueueInput, Patient, PatientDocument, PatientDraft, Payment, QueueEntry, VisitType, Vitals } from '../../types/domain';
 
 export interface PaginatedResponse<T> { items: T[]; page: number; pageSize: number; total: number; }
 export interface PatientSearchParams { query?: string; department?: Department; page?: number; pageSize?: number; }
@@ -17,13 +17,32 @@ export interface ReportSummary {
   departmentActivity: Partial<Record<Department, number>>;
 }
 export interface CreatePatientRequest extends PatientDraft { department: Department; }
+export interface UpdatePatientRequest extends Partial<PatientDraft> {
+  departments?: Department[];
+}
 export interface CreateAppointmentRequest extends NewAppointmentInput {}
 export interface CreateQueueRequest extends NewQueueInput {}
-export interface UpdateQueueRequest { status: QueueEntry['status']; }
+export interface UpdateQueueRequest {
+  status?: QueueEntry['status'];
+  department?: Department;
+  doctor?: string;
+  visitType?: VisitType;
+  note?: string;
+  vitals?: Vitals;
+  patientPhone?: string;
+  patientFullName?: string;
+  patientAddress?: string;
+}
 export interface SaveConsultationRequest extends Omit<Partial<Consultation>, 'department' | 'id' | 'patientId'> { visitId: string; patientId: string; department: Department; }
 export interface RecordPaymentRequest extends Omit<Payment, 'id' | 'paidAt'> { invoiceId: string; }
 export interface CreateFollowUpRequest extends NewFollowUpInput {}
-export interface UpdateFollowUpRequest { status?: FollowUp['status']; date?: string; note?: string; reminderAction?: 'two-days-before' | 'on-date' | 'manual'; }
+export interface UpdateFollowUpRequest {
+  status?: FollowUp['status'];
+  date?: string;
+  note?: string;
+  reminderStatus?: FollowUp['reminderStatus'];
+  reminderAction?: 'queue' | 'send' | 'two-days-before' | 'on-date' | 'manual';
+}
 export interface CreateVisitChargeRequest { description: string; amount: number; }
 export interface QueueResponse extends QueueEntry {}
 export interface ApiEntities {

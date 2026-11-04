@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react';
 import type {
   Appointment,
   ChargeItem,
@@ -15,6 +15,7 @@ import type {
 import { useAuth } from '../auth/AuthContext';
 import { hospitalApi } from './hospitalApi';
 import { requestJson } from './httpClient';
+import { wsClient, type WsStatus } from './websocketClient';
 
 export interface ApiHospitalState {
   patients: Patient[];
@@ -26,13 +27,14 @@ export interface ApiHospitalState {
   fees: FeeConfiguration;
 }
 
-interface ApiContextValue {
+export interface ApiContextValue {
   state: ApiHospitalState;
   repository: any;
   mode: 'api';
   refetch: () => Promise<void>;
   isLoading: boolean;
   error: string | null;
+  wsStatus: WsStatus;
 }
 
 export const ApiDataContext = createContext<ApiContextValue | null>(null);
@@ -52,6 +54,7 @@ export function ApiProvider({ children }: PropsWithChildren) {
   const [state, setState] = useState<ApiHospitalState>(DEFAULT_STATE);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [wsStatus, setWsStatus] = useState<WsStatus>(wsClient.getStatus());
 
   const fetchClinicData = async () => {
     if (!user) {
@@ -62,13 +65,15 @@ export function ApiProvider({ children }: PropsWithChildren) {
     try {
       setError(null);
       const isReception = user.role === 'reception';
+      const isClinician = user.role === 'skin' || user.role === 'orthopaedics';
+      const deptFilter = isClinician ? user.role : (user.department || undefined);
       const [patientsRes, apptsRes, queueRes, invoicesRes, followUpsRes, visitsRes, feesRes] = await Promise.all([
         hospitalApi.listPatients({ pageSize: 100 }),
         hospitalApi.listAppointments({ pageSize: 100 }),
         hospitalApi.listQueue({ pageSize: 100 }),
         hospitalApi.listInvoices({ pageSize: 100 }),
         hospitalApi.listFollowUps({ pageSize: 100 }),
-        hospitalApi.listVisits({ pageSize: 100 }),
+        hospitalApi.listVisits({ pageSize: 100, ...(deptFilter ? { department: deptFilter } : {}) }),
         isReception ? requestJson<FeeConfiguration>('/settings/fees') : Promise.resolve({ skin: 700, orthopaedics: 900, currency: 'INR' as const }),
       ]);
 
@@ -107,12 +112,36 @@ export function ApiProvider({ children }: PropsWithChildren) {
     }
   };
 
+  const fetchClinicDataRef = useRef(fetchClinicData);
+  fetchClinicDataRef.current = fetchClinicData;
+
   useEffect(() => {
     if (user) {
       setIsLoading(true);
       fetchClinicData();
+      wsClient.connect();
+    } else {
+      wsClient.disconnect();
     }
   }, [user]);
+
+  useEffect(() => {
+    const unsubStatus = wsClient.onStatusChange(setWsStatus);
+    let debounceTimer: any = null;
+
+    const unsubEvents = wsClient.subscribe((_msg) => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchClinicDataRef.current();
+      }, 150);
+    });
+
+    return () => {
+      unsubStatus();
+      unsubEvents();
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, []);
 
   const repository = useMemo(() => {
     return {
@@ -122,6 +151,11 @@ export function ApiProvider({ children }: PropsWithChildren) {
         const created = await hospitalApi.createPatient(input);
         await fetchClinicData();
         return created;
+      },
+      updatePatient: async (id: string, patch: any) => {
+        const updated = await hospitalApi.updatePatient(id, patch);
+        await fetchClinicData();
+        return updated;
       },
 
       // Appointments
@@ -437,10 +471,11 @@ export function ApiProvider({ children }: PropsWithChildren) {
       repository,
       mode: 'api' as const,
       refetch: fetchClinicData,
+      wsStatus,
       isLoading,
       error,
     }),
-    [state, repository, isLoading, error],
+    [state, repository, isLoading, error, wsStatus],
   );
 
   return <ApiDataContext.Provider value={value}>{children}</ApiDataContext.Provider>;

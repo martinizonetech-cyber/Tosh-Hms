@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { format, isValid, parseISO } from 'date-fns';
 import {
   AlertCircle,
   Calendar,
@@ -9,23 +10,74 @@ import {
   Clock,
   Copy,
   Download,
+  ExternalLink,
   Eye,
   FileText,
   Image as ImageIcon,
   Pill,
   Plus,
+  Printer,
   Stethoscope,
   Activity,
   X,
 } from 'lucide-react';
-import type { Consultation, Department, PrescriptionItem } from '../../../types/domain';
+import type { Consultation, Department, PrescriptionImage, PrescriptionItem } from '../../../types/domain';
 import { Card, SectionHeading } from '../../../components/ui/Card';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Modal } from '../../../components/ui/Modal';
-import { dateLabel, departmentLabel, downloadFile, resolveDocumentUrl, resolveInlineDocumentUrl } from '../../../utils/format';
+import { dateLabel, departmentLabel, downloadFile, fetchPdfBlobUrl, resolveDocumentUrl, resolveInlineDocumentUrl } from '../../../utils/format';
 import { readBodyRegionTemplates } from './bodyRegionTemplates';
+import {
+  PrintLetterhead,
+  PrintPatientMeta,
+  PrintRxTable,
+  PrintDoctorSignatureBlock,
+} from '../../../components/shared/PrintTemplates';
+
+interface UploadDateGroup<T> {
+  dateKey: string;
+  label: string;
+  items: T[];
+}
+
+function groupByUploadDate<T extends { uploadedAt?: string }>(
+  items?: T[],
+  fallbackDate?: string
+): UploadDateGroup<T>[] {
+  if (!items || items.length === 0) return [];
+  const map = new Map<string, { dateKey: string; label: string; items: T[] }>();
+
+  items.forEach((item) => {
+    const raw = item.uploadedAt || fallbackDate || new Date().toISOString();
+    let dateKey = 'other';
+    let label = 'Uploaded Files';
+    try {
+      const d = typeof raw === 'string' ? parseISO(raw) : new Date(raw);
+      if (isValid(d)) {
+        dateKey = format(d, 'yyyy-MM-dd');
+        label = format(d, 'd MMMM yyyy');
+      }
+    } catch {
+      dateKey = 'other';
+      label = 'Uploaded Files';
+    }
+
+    if (!map.has(dateKey)) {
+      map.set(dateKey, { dateKey, label, items: [] });
+    }
+    map.get(dateKey)!.items.push(item);
+  });
+
+  return Array.from(map.values()).sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+}
+
+
+const doctorNames: Record<Department, string> = {
+  skin: 'Dr. Priya Ramanathan, MD (Dermatology)',
+  orthopaedics: 'Dr. K. Sundarprakash, MBBS, MS (Orthopaedics), DNB (Ortho)',
+};
 
 /** Parse the stored diagnosis string (newline-separated) into an array of tags */
 function parseDiagnosisTags(raw: string): string[] {
@@ -46,6 +98,7 @@ interface ClinicalNotesPanelProps {
   onChange: (patch: Partial<Consultation>) => void;
   previousVisits?: Consultation[];
   onCopyPrescription?: (items: PrescriptionItem[]) => void;
+  patient?: { id: string; fullName: string; dateOfBirth?: string; gender: string; phone?: string; address?: string };
 }
 
 export function ClinicalNotesPanel({
@@ -54,16 +107,54 @@ export function ClinicalNotesPanel({
   onChange,
   previousVisits = [],
   onCopyPrescription,
+  patient,
 }: ClinicalNotesPanelProps) {
+
+
+  // Strictly isolate history: only show past visits for the current doctor's department
+  const deptPreviousVisits = useMemo(
+    () => (previousVisits || []).filter((v) => v.department === department),
+    [previousVisits, department]
+  );
+
   const [expandedVisits, setExpandedVisits] = useState<Record<string, boolean>>(() => {
-    if (previousVisits.length > 0) {
-      return { [previousVisits[0].id]: true };
+    if (deptPreviousVisits.length > 0) {
+      return { [deptPreviousVisits[0].id]: true };
     }
     return {};
   });
 
-  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
+  useEffect(() => {
+    if (deptPreviousVisits.length > 0) {
+      setExpandedVisits((prev) => {
+        if (Object.keys(prev).length === 0) {
+          return { [deptPreviousVisits[0].id]: true };
+        }
+        return prev;
+      });
+    }
+  }, [deptPreviousVisits]);
+
+  const [previewImage, setPreviewImage] = useState<PrescriptionImage | null>(null);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [copiedItemIds, setCopiedItemIds] = useState<Record<string, boolean>>({});
+  const [printingPastVisit, setPrintingPastVisit] = useState<{
+    visit: Consultation;
+    mode: 'files' | 'prescription';
+  } | null>(null);
+
+  const handlePrintPastVisit = (visit: Consultation, mode: 'files' | 'prescription') => {
+    setPrintingPastVisit({ visit, mode });
+    const printClass = mode === 'files' ? 'print-past-clinical' : 'print-past-prescription';
+    document.body.classList.add(printClass);
+    window.setTimeout(() => {
+      window.print();
+      document.body.classList.remove(printClass);
+      setPrintingPastVisit(null);
+    }, 120);
+  };
 
   // Diagnosis tag input state
   const [diagInput, setDiagInput] = useState('');
@@ -75,6 +166,52 @@ export function ClinicalNotesPanel({
     const defaults = ['Knee', 'Shoulder', 'Hip', 'Spine', 'Elbow', 'Wrist', 'Ankle', 'Foot', 'Other'];
     return Array.from(new Set([...configured, ...defaults]));
   }, []);
+
+  // Fetch local Blob URL for reliable PDF inline preview (bypasses cross-origin iframe blocking)
+  useEffect(() => {
+    let active = true;
+
+    if (!previewImage) {
+      setPdfBlobUrl(null);
+      setPdfLoading(false);
+      setPdfError(null);
+      return;
+    }
+
+    const isPdf =
+      previewImage.mimeType === 'application/pdf' ||
+      previewImage.name?.toLowerCase().endsWith('.pdf');
+
+    if (!isPdf) {
+      setPdfBlobUrl(null);
+      setPdfLoading(false);
+      setPdfError(null);
+      return;
+    }
+
+    setPdfLoading(true);
+    setPdfError(null);
+
+    fetchPdfBlobUrl(previewImage)
+      .then((url) => {
+        if (!active) {
+          if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
+          return;
+        }
+        setPdfBlobUrl(url);
+        setPdfLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setPdfBlobUrl(resolveInlineDocumentUrl(previewImage));
+        setPdfError(err instanceof Error ? err.message : 'Could not prepare inline PDF preview.');
+        setPdfLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [previewImage]);
 
   const toggleVisit = (id: string) => {
     setExpandedVisits((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -182,31 +319,31 @@ export function ClinicalNotesPanel({
         )}
       </Card>
 
-      {/* ── 2. Patient Clinical History & Previous Visits ── */}
+      {/* ── 2. Patient Clinical History & Previous Visits (Department-Specific) ── */}
       <Card>
         <SectionHeading
-          title="Patient Clinical History & Previous Visits"
-          subtitle="Review previous consultation history, assigned prescriptions, uploaded documents, and visit details."
+          title={`${departmentLabel(department)} Clinical History & Previous Visits`}
+          subtitle={`Review previous consultation history, assigned prescriptions, and uploaded documents for ${departmentLabel(department)}.`}
           action={
-            previousVisits.length > 0 ? (
+            deptPreviousVisits.length > 0 ? (
               <Badge tone="neutral">
-                {previousVisits.length} Previous Visit{previousVisits.length === 1 ? '' : 's'}
+                {deptPreviousVisits.length} Previous Visit{deptPreviousVisits.length === 1 ? '' : 's'}
               </Badge>
             ) : null
           }
         />
 
-        {previousVisits.length === 0 ? (
+        {deptPreviousVisits.length === 0 ? (
           <div style={{ padding: '16px 0' }}>
             <EmptyState
-              title="First Visit · No Prior Consultation History"
-              message="This patient has no previous consultations recorded in the clinic system. The symptoms and prescription documented today will begin their clinical history."
+              title={`First Visit · No Prior ${departmentLabel(department)} History`}
+              message={`This patient has no previous ${departmentLabel(department)} consultations recorded in the clinic system. The symptoms and prescription documented today will begin their ${departmentLabel(department)} clinical history.`}
               icon={<Stethoscope size={20} />}
             />
           </div>
         ) : (
           <div className="stack" style={{ gap: '14px', marginTop: '12px' }}>
-            {previousVisits.map((visit, index) => {
+            {deptPreviousVisits.map((visit, index) => {
               const isExpanded = !!expandedVisits[visit.id];
               const isLatest = index === 0;
               const rxCount = visit.prescription?.length || 0;
@@ -280,6 +417,7 @@ export function ClinicalNotesPanel({
                   {/* Collapsible Card Body */}
                   {isExpanded && (
                     <div style={{ padding: '16px', display: 'grid', gap: '16px' }}>
+
                       {/* Vitals Summary Strip if recorded */}
                       {hasVitals && (
                         <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px 14px' }}>
@@ -329,8 +467,15 @@ export function ClinicalNotesPanel({
                       )}
 
                       {/* Symptoms & Diagnosis */}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
-                        <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '8px', padding: '12px 14px' }}>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: visit.diagnosis ? 'repeat(2, minmax(0, 1fr))' : '1fr',
+                          gap: '16px',
+                          alignItems: 'stretch',
+                        }}
+                      >
+                        <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#92400E', marginBottom: '6px' }}>
                             <AlertCircle size={14} />
                             <span>Previous Chief Complaints</span>
@@ -346,7 +491,7 @@ export function ClinicalNotesPanel({
                         </div>
 
                         {visit.diagnosis && (
-                          <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '12px 14px' }}>
+                          <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#166534', marginBottom: '6px' }}>
                               <CheckCircle2 size={14} />
                               <span>Previous Diagnosis</span>
@@ -386,28 +531,41 @@ export function ClinicalNotesPanel({
                             <Pill size={15} color="var(--teal)" />
                             Assigned Prescriptions ({rxCount} medication{rxCount === 1 ? '' : 's'})
                           </span>
-                          {rxCount > 0 && onCopyPrescription && (
-                            <Button
-                              size="small"
-                              variant="secondary"
-                              onClick={() => handleCopyAllItems(visit.prescription)}
-                              icon={<Copy size={13} />}
-                            >
-                              Copy all to today's prescription
-                            </Button>
-                          )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            {rxCount > 0 && (
+                              <Button
+                                size="small"
+                                variant="secondary"
+                                onClick={() => handlePrintPastVisit(visit, 'prescription')}
+                                icon={<Printer size={13} />}
+                                title="Print past visit prescription"
+                              >
+                                Print prescription
+                              </Button>
+                            )}
+                            {rxCount > 0 && onCopyPrescription && (
+                              <Button
+                                size="small"
+                                variant="secondary"
+                                onClick={() => handleCopyAllItems(visit.prescription)}
+                                icon={<Copy size={13} />}
+                              >
+                                Copy all to today's prescription
+                              </Button>
+                            )}
+                          </div>
                         </div>
 
                         {rxCount > 0 ? (
                           <div className="table-wrap" style={{ margin: 0 }}>
-                            <table className="data-table" style={{ fontSize: '12px' }}>
+                            <table className="data-table past-rx-table" style={{ width: '100%', tableLayout: 'fixed', fontSize: '12px', borderCollapse: 'collapse' }}>
                               <thead>
                                 <tr>
                                   <th style={{ width: '40px', textAlign: 'center' }}>#</th>
-                                  <th>Medicine Name &amp; Strength</th>
-                                  <th>Dosage &amp; Route</th>
-                                  <th>Frequency &amp; Duration</th>
-                                  <th>Instructions</th>
+                                  <th style={{ width: onCopyPrescription ? '28%' : '32%', padding: '10px 12px' }}>Medicine Name &amp; Strength</th>
+                                  <th style={{ width: onCopyPrescription ? '18%' : '20%', padding: '10px 12px' }}>Dosage &amp; Route</th>
+                                  <th style={{ width: onCopyPrescription ? '18%' : '20%', padding: '10px 12px' }}>Frequency &amp; Duration</th>
+                                  <th style={{ width: onCopyPrescription ? '26%' : '28%', padding: '10px 12px' }}>Instructions</th>
                                   {onCopyPrescription && <th style={{ textAlign: 'center', width: '90px' }}>Action</th>}
                                 </tr>
                               </thead>
@@ -416,13 +574,13 @@ export function ClinicalNotesPanel({
                                   const isCopied = copiedItemIds[rx.id];
                                   return (
                                     <tr key={rx.id || rxIdx}>
-                                      <td style={{ textAlign: 'center', color: 'var(--muted)' }}>{rxIdx + 1}</td>
+                                      <td style={{ textAlign: 'center', color: 'var(--muted)', verticalAlign: 'top', padding: '12px 6px' }}>{rxIdx + 1}</td>
                                       <td>
                                         <strong style={{ color: 'var(--navy)' }}>{rx.medicineName}</strong>
                                         {rx.strength && <span style={{ color: 'var(--muted)', display: 'block', fontSize: '11px' }}>{rx.strength}</span>}
                                         {rx.appliedAreas && rx.appliedAreas.length > 0 && (
                                           <span style={{ color: '#047857', display: 'block', fontSize: '11px', fontWeight: 600, marginTop: '2px' }}>
-                                            📍 Area: {rx.appliedAreas.join(', ')}
+                                           Area: {rx.appliedAreas.join(', ')}
                                           </span>
                                         )}
                                       </td>
@@ -435,7 +593,7 @@ export function ClinicalNotesPanel({
                                         {rx.duration && <span style={{ color: 'var(--muted)', display: 'block', fontSize: '11px' }}>{rx.duration}</span>}
                                       </td>
                                       <td>
-                                        <span style={{ color: 'var(--ink)' }}>{rx.instructions || 'As directed'}</span>
+                                        <span style={{ color: 'var(--ink)', fontSize: '12px' }}>{rx.instructions || 'As directed'}</span>
                                       </td>
                                       {onCopyPrescription && (
                                         <td style={{ textAlign: 'center' }}>
@@ -463,59 +621,119 @@ export function ClinicalNotesPanel({
                         )}
                       </div>
 
-                      {/* Uploaded Prescription / Scans */}
+                      {/* Uploaded Prescription / Scans (Grouped & Separated by Upload Date) */}
                       <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '14px', background: '#FFFFFF' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--navy)', display: 'inline-flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
-                          <ImageIcon size={15} color="var(--teal)" />
-                          Uploaded Prescription &amp; Attachments ({imgCount})
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--navy)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            <ImageIcon size={15} color="var(--teal)" />
+                            Uploaded Prescription &amp; Attachments ({imgCount})
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            {imgCount > 0 && (
+                              <span style={{ fontSize: '11px', color: '#64748B', background: '#F1F5F9', padding: '2px 8px', borderRadius: '6px', fontWeight: 500 }}>
+                                Separated by upload date
+                              </span>
+                            )}
+                            {imgCount > 0 && (
+                              <Button
+                                size="small"
+                                variant="secondary"
+                                onClick={() => handlePrintPastVisit(visit, 'files')}
+                                icon={<Printer size={13} />}
+                                title="Print uploaded files and prescription scans"
+                              >
+                                Print old files
+                              </Button>
+                            )}
+                          </div>
+                        </div>
 
                         {imgCount > 0 ? (
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '12px' }}>
-                            {visit.prescriptionImages?.map((img, imgIdx) => {
-                              const isPdf = img.mimeType === 'application/pdf' || img.name?.toLowerCase().endsWith('.pdf');
-                              const url = resolveInlineDocumentUrl(img);
-
-                              return (
-                                <div
-                                  key={img.id || imgIdx}
-                                  onClick={() => setPreviewImage({ url, name: img.name })}
-                                  style={{
-                                    border: '1px solid #CBD5E1',
-                                    borderRadius: '8px',
-                                    overflow: 'hidden',
-                                    background: '#F8FAFC',
-                                    cursor: 'pointer',
-                                    transition: 'transform 0.15s, box-shadow 0.15s',
-                                  }}
-                                  title="Click to preview"
-                                >
-                                  {isPdf ? (
-                                    <div style={{ height: '90px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#FEE2E2', color: '#DC2626' }}>
-                                      <FileText size={28} />
-                                      <span style={{ fontSize: '10px', fontWeight: 700, marginTop: '4px' }}>PDF File</span>
-                                    </div>
-                                  ) : (
-                                    <div style={{ height: '90px', background: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                      <img
-                                        src={url}
-                                        alt={img.name}
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                        onError={(e) => {
-                                          e.currentTarget.style.display = 'none';
-                                        }}
-                                      />
-                                    </div>
-                                  )}
-                                  <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
-                                    <span style={{ fontSize: '11px', color: 'var(--navy)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                      {img.name || `Scan ${imgIdx + 1}`}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            {groupByUploadDate(visit.prescriptionImages, visit.visitedAt).map((group) => (
+                              <div key={group.dateKey} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {/* Dashed Date Separator Bar */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '4px 0 2px' }}>
+                                  <div style={{ flex: 1, borderTop: '1px dashed #CBD5E1' }} />
+                                  <span
+                                    style={{
+                                      fontSize: '11.5px',
+                                      fontWeight: 700,
+                                      color: '#334155',
+                                      background: '#F8FAFC',
+                                      border: '1px solid #CBD5E1',
+                                      padding: '3px 12px',
+                                      borderRadius: '16px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+                                    }}
+                                  >
+                                    <Calendar size={13} color="#0D9488" />
+                                    <span>{group.label}</span>
+                                    <span style={{ fontSize: '10.5px', color: '#64748B', fontWeight: 600 }}>
+                                      ({group.items.length} {group.items.length === 1 ? 'file' : 'files'})
                                     </span>
-                                    <Eye size={13} color="var(--muted)" />
-                                  </div>
+                                  </span>
+                                  <div style={{ flex: 1, borderTop: '1px dashed #CBD5E1' }} />
                                 </div>
-                              );
-                            })}
+
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '12px' }}>
+                                  {group.items.map((img, imgIdx) => {
+                                    const isPdf = img.mimeType === 'application/pdf' || img.name?.toLowerCase().endsWith('.pdf');
+                                    const url = resolveInlineDocumentUrl(img);
+
+                                    return (
+                                      <div
+                                        key={img.id || imgIdx}
+                                        onClick={() => setPreviewImage(img)}
+                                        style={{
+                                          border: '1px solid #CBD5E1',
+                                          borderRadius: '8px',
+                                          overflow: 'hidden',
+                                          background: '#F8FAFC',
+                                          cursor: 'pointer',
+                                          transition: 'transform 0.15s, box-shadow 0.15s',
+                                        }}
+                                        title="Click to preview"
+                                      >
+                                        {isPdf ? (
+                                          <div style={{ height: '90px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#FEE2E2', color: '#DC2626' }}>
+                                            <FileText size={28} />
+                                            <span style={{ fontSize: '10px', fontWeight: 700, marginTop: '4px' }}>PDF File</span>
+                                          </div>
+                                        ) : (
+                                          <div style={{ height: '90px', background: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                            <img
+                                              src={url}
+                                              alt={img.name}
+                                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                              onError={(e) => {
+                                                e.currentTarget.style.display = 'none';
+                                              }}
+                                            />
+                                          </div>
+                                        )}
+                                        <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
+                                            <span style={{ fontSize: '11px', color: 'var(--navy)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                              {img.name || `Scan ${imgIdx + 1}`}
+                                            </span>
+                                            <Eye size={13} color="var(--muted)" style={{ flexShrink: 0 }} />
+                                          </div>
+                                          {img.uploadedAt && (
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>
+                                              {dateLabel(img.uploadedAt, 'h:mm a')} · {(img.size / 1024).toFixed(0)} KB
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         ) : (
                           <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)', fontStyle: 'italic' }}>
@@ -524,7 +742,7 @@ export function ClinicalNotesPanel({
                         )}
                       </div>
 
-                      {/* Additional Documents or Procedures if any */}
+                      {/* Clinical Documents & Procedures */}
                       {((visit.documents && visit.documents.length > 0) || (visit.procedures && visit.procedures.length > 0)) && (
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
                           {visit.documents && visit.documents.length > 0 && (
@@ -710,44 +928,199 @@ export function ClinicalNotesPanel({
         </div>
       </Card>
 
-      {/* Image Preview Modal */}
-      {previewImage && (
-        <Modal
-          open={!!previewImage}
-          onClose={() => setPreviewImage(null)}
-          title={previewImage.name || 'Prescription Attachment Preview'}
-          wide
-        >
-          <div style={{ textAlign: 'center', padding: '10px' }}>
-            {previewImage.name?.toLowerCase().endsWith('.pdf') ? (
-              <iframe
-                src={previewImage.url}
-                title={previewImage.name}
-                style={{ width: '100%', height: '70vh', border: '1px solid var(--line)', borderRadius: '6px' }}
-              />
-            ) : (
-              <img
-                src={previewImage.url}
-                alt={previewImage.name}
-                style={{ maxWidth: '100%', maxHeight: '72vh', objectFit: 'contain', borderRadius: '6px', border: '1px solid #E2E8F0' }}
-              />
-            )}
-            <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'center', gap: '8px' }}>
-              <Button
-                size="small"
-                variant="secondary"
-                onClick={() => downloadFile(previewImage.url, previewImage.name)}
-                icon={<Download size={14} />}
-              >
-                Download File
-              </Button>
-              <Button size="small" variant="secondary" onClick={() => setPreviewImage(null)}>
-                Close Preview
-              </Button>
+      {/* Image & PDF Preview Modal */}
+      {previewImage && (() => {
+        const isPdf =
+          previewImage.mimeType === 'application/pdf' ||
+          previewImage.name?.toLowerCase().endsWith('.pdf');
+        const resolvedDirectUrl = resolveInlineDocumentUrl(previewImage);
+        const activeUrl = pdfBlobUrl || resolvedDirectUrl;
+
+        return (
+          <Modal
+            open={!!previewImage}
+            onClose={() => setPreviewImage(null)}
+            title={previewImage.name || 'Prescription Attachment Preview'}
+            subtitle={previewImage.size ? `${(previewImage.size / 1024).toFixed(0)} KB · Prescription attachment` : undefined}
+            wide
+          >
+            <div style={{ textAlign: 'center', padding: '6px' }}>
+              {pdfError && <div style={{ color: '#DC2626', fontSize: '12px', marginBottom: '8px' }}>{pdfError}</div>}
+              {isPdf ? (
+                <div style={{ position: 'relative', width: '100%', minHeight: '65vh' }}>
+                  {pdfLoading ? (
+                    <div
+                      style={{
+                        height: '65vh',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: '#F8FAFC',
+                        borderRadius: '8px',
+                        border: '1px solid var(--line)',
+                        gap: '12px',
+                      }}
+                    >
+                      <Activity size={32} style={{ color: 'var(--teal)', animation: 'spin 1.5s linear infinite' }} />
+                      <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--navy)' }}>Preparing PDF preview…</span>
+                    </div>
+                  ) : (
+                    <iframe
+                      src={activeUrl}
+                      title={previewImage.name || 'Prescription PDF Preview'}
+                      style={{ width: '100%', height: '72vh', border: '1px solid var(--line)', borderRadius: '8px', background: '#FFFFFF' }}
+                    />
+                  )}
+                </div>
+              ) : (
+                <img
+                  src={resolvedDirectUrl}
+                  alt={previewImage.name}
+                  style={{ maxWidth: '100%', maxHeight: '72vh', objectFit: 'contain', borderRadius: '6px', border: '1px solid #E2E8F0' }}
+                />
+              )}
+
+              <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                {isPdf && (
+                  <Button
+                    size="small"
+                    variant="primary"
+                    onClick={() => window.open(activeUrl, '_blank', 'noopener,noreferrer')}
+                    icon={<ExternalLink size={14} />}
+                    style={{ background: '#13808D', borderColor: '#13808D' }}
+                  >
+                    Open in New Tab
+                  </Button>
+                )}
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() => {
+                    if (isPdf) {
+                      window.open(activeUrl, '_blank', 'noopener,noreferrer');
+                    } else {
+                      const win = window.open('', '_blank');
+                      if (win) {
+                        win.document.write(`<html><head><title>${previewImage.name || 'Medical File'}</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;}img{max-width:100%;max-height:100%;}</style></head><body><img src="${resolvedDirectUrl}" onload="window.print();window.close();"/></body></html>`);
+                        win.document.close();
+                      }
+                    }
+                  }}
+                  icon={<Printer size={14} />}
+                >
+                  Print File
+                </Button>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() => downloadFile(activeUrl, previewImage.name)}
+                  icon={<Download size={14} />}
+                >
+                  Download File
+                </Button>
+                <Button size="small" variant="secondary" onClick={() => setPreviewImage(null)}>
+                  Close Preview
+                </Button>
+              </div>
             </div>
-          </div>
-        </Modal>
+          </Modal>
+        );
+      })()}
+
+      {/* Printable Historical Visit Record (Triggered by past visit print buttons) */}
+      {printingPastVisit && (
+        <section
+          className={`print-sheet ${printingPastVisit.mode === 'files' ? 'past-clinical-print-sheet' : 'past-prescription-print-sheet'}`}
+          aria-label="Printable historical visit record"
+        >
+          <PrintLetterhead
+            department={department}
+            documentTitle={printingPastVisit.mode === 'files' ? 'HISTORICAL MEDICAL FILES & SCANNED PRESCRIPTIONS' : 'HISTORICAL PRESCRIPTION / MEDICAL ORDER'}
+            documentSubTitle={`Previous Consultation Record · Visit ${printingPastVisit.visit.id || 'N/A'}`}
+          />
+          {patient && (
+            <PrintPatientMeta
+              patient={patient as any}
+              visitedAt={printingPastVisit.visit.visitedAt}
+              doctorName={doctorNames[department]}
+              tokenOrVisitLabel={`Historical Visit ${printingPastVisit.visit.id || ''} · ${dateLabel(printingPastVisit.visit.visitedAt, 'd MMM yyyy, h:mm a')}`}
+            />
+          )}
+
+          {printingPastVisit.visit.diagnosis && (
+            <div className="print-diagnosis-banner">
+              <span className="print-diag-label">Clinical Indication / Diagnosis:</span>
+              <strong className="print-diag-value">{printingPastVisit.visit.diagnosis}</strong>
+            </div>
+          )}
+
+          {/* If printing prescription, show Rx table */}
+          {printingPastVisit.mode === 'prescription' && printingPastVisit.visit.prescription && printingPastVisit.visit.prescription.length > 0 && (
+            <PrintRxTable items={printingPastVisit.visit.prescription} />
+          )}
+
+          {/* Uploaded Scans / Old Files */}
+          {printingPastVisit.visit.prescriptionImages && printingPastVisit.visit.prescriptionImages.length > 0 && (
+            <div className="print-prescription-images-wrap print-no-break" style={{ marginTop: 14 }}>
+              <div className="print-block-heading">
+                Uploaded Prescription Scans &amp; Attached Files ({printingPastVisit.visit.prescriptionImages.length})
+              </div>
+              <div className="print-prescription-images-grid">
+                {printingPastVisit.visit.prescriptionImages.map((img, i) => {
+                  const isPdf = img.mimeType === 'application/pdf' || img.name?.toLowerCase().endsWith('.pdf');
+                  const url = resolveInlineDocumentUrl(img);
+                  return (
+                    <div key={img.id || i} className="print-prescription-img-tile">
+                      {isPdf ? (
+                        <div style={{ padding: '20px 10px', textAlign: 'center', background: '#F8FAFC', borderRadius: 4, border: '1px solid #CBD5E1' }}>
+                          <span style={{ fontWeight: 700, color: '#DC2626', fontSize: 13, display: 'block' }}>[PDF Document]</span>
+                          <p style={{ margin: '6px 0 0', fontSize: 11, color: '#334155' }}>{img.name}</p>
+                        </div>
+                      ) : (
+                        <img src={url} alt={img.name || `Prescription Attachment ${i + 1}`} />
+                      )}
+                      <span className="print-prescription-img-caption">
+                        {img.name || `File ${i + 1}`}
+                        {img.uploadedAt && <span> · {dateLabel(img.uploadedAt, 'd MMM yyyy')}</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {printingPastVisit.visit.documents && printingPastVisit.visit.documents.length > 0 && (
+            <div className="print-block print-no-break" style={{ marginTop: 14 }}>
+              <div className="print-block-heading">Attached Diagnostic Documents &amp; Imaging ({printingPastVisit.visit.documents.length})</div>
+              <div className="print-documents-grid">
+                {printingPastVisit.visit.documents.map((doc, idx) => (
+                  <div key={doc.id || idx} className="print-document-tile">
+                    <strong>{doc.name}</strong>
+                    <span>Category: {doc.category || 'Diagnostic'} · {doc.uploadedAt ? dateLabel(doc.uploadedAt, 'd MMM yyyy') : ''}</span>
+                    {doc.size ? <span>Size: {(doc.size / 1024).toFixed(0)} KB</span> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {printingPastVisit.visit.treatmentPlan && (
+            <div className="print-block print-no-break" style={{ marginTop: 14 }}>
+              <div className="print-block-heading">Medication Advice &amp; Patient Instructions</div>
+              <p className="print-block-content">{printingPastVisit.visit.treatmentPlan}</p>
+            </div>
+          )}
+
+          <PrintDoctorSignatureBlock
+            doctorName={doctorNames[department]}
+            department={department}
+            date={printingPastVisit.visit.visitedAt}
+          />
+        </section>
       )}
+
     </div>
   );
 }

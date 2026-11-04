@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 import uuid
 
 from fastapi import APIRouter, Depends, Query, status
@@ -5,11 +6,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictException, ForbiddenException, NotFoundException
+from app.core.websocket import broadcast_event
 from app.db.session import get_db
 from app.modules.appointments.models import Appointment
 from app.modules.auth.dependencies import get_current_user, require_role
 from app.modules.billing.models import Invoice
 from app.modules.checkin.service import CheckInService
+from app.modules.patients.models import Patient
 from app.modules.patients.router import find_patient_by_id
 from app.modules.queue.models import QueueEntry
 from app.modules.queue.schemas import (
@@ -20,7 +23,8 @@ from app.modules.queue.schemas import (
     VitalsSchema,
 )
 from app.modules.users.models import Doctor, User
-from app.modules.visits.models import VitalsRecord
+from app.modules.consultations.models import Consultation
+from app.modules.visits.models import Visit, VitalsRecord
 
 router = APIRouter(prefix="/queue", tags=["Queue"])
 
@@ -204,6 +208,8 @@ async def create_queue(
     await db.commit()
     await db.refresh(queue_entry)
 
+    await broadcast_event("QUEUE_UPDATE", {"action": "checkin", "id": queue_entry.display_id, "department": dept})
+
     # Fetch vitals record
     v_stmt = select(VitalsRecord).where(VitalsRecord.visit_id == queue_entry.visit_id)
     v_res = await db.execute(v_stmt)
@@ -212,7 +218,7 @@ async def create_queue(
     return to_queue_entry_response(queue_entry, "Due", v_rec)
 
 
-@router.patch("/{queue_id}", response_model=QueueEntryResponse, summary="Update queue entry status")
+@router.patch("/{queue_id}", response_model=QueueEntryResponse, summary="Update queue entry")
 async def update_queue(
     queue_id: str,
     payload: UpdateQueueRequest,
@@ -226,34 +232,137 @@ async def update_queue(
     if current_user.role in ("skin", "orthopaedics") and queue_entry.department != current_user.role:
         raise ForbiddenException("Clinicians cannot update queue entries from other departments.")
 
-    current_status = queue_entry.status
-    new_status = payload.status
+    # 1. Update status if provided
+    if payload.status:
+        current_status = queue_entry.status
+        new_status = payload.status
 
-    allowed = VALID_QUEUE_TRANSITIONS.get(current_status, set())
-    if new_status not in allowed and new_status != current_status:
-        raise ConflictException(
-            f"Cannot transition queue status from '{current_status}' to '{new_status}'.",
-            code="INVALID_TRANSITION",
+        allowed = VALID_QUEUE_TRANSITIONS.get(current_status, set())
+        if new_status not in allowed and new_status != current_status:
+            raise ConflictException(
+                f"Cannot transition queue status from '{current_status}' to '{new_status}'.",
+                code="INVALID_TRANSITION",
+            )
+
+        queue_entry.status = new_status
+
+        # Sync linked appointment status
+        if queue_entry.visit and queue_entry.visit.appointment_id:
+            apt_stmt = select(Appointment).where(Appointment.id == queue_entry.visit.appointment_id)
+            apt_res = await db.execute(apt_stmt)
+            apt = apt_res.scalar_one_or_none()
+            if apt:
+                if new_status == "Consulting" and apt.status != "Completed":
+                    apt.status = "In progress"
+                elif new_status == "Completed":
+                    apt.status = "Completed"
+
+    # 2. Update department if provided
+    if payload.department:
+        dept = payload.department.lower()
+        queue_entry.department = dept
+        if queue_entry.visit_id:
+            v_stmt = select(Visit).where(Visit.id == queue_entry.visit_id)
+            v_res = await db.execute(v_stmt)
+            vis = v_res.scalar_one_or_none()
+            if vis:
+                vis.department = dept
+            cons_stmt = select(Consultation).where(Consultation.visit_id == queue_entry.visit_id)
+            cons_res = await db.execute(cons_stmt)
+            cons = cons_res.scalar_one_or_none()
+            if cons:
+                cons.department = dept
+
+    # 3. Update doctor if provided
+    if payload.doctor:
+        doc_stmt = select(Doctor).where(
+            func.lower(Doctor.display_name) == payload.doctor.lower().strip()
         )
+        doc_res = await db.execute(doc_stmt)
+        doctor_obj = doc_res.scalar_one_or_none()
+        if not doctor_obj:
+            dept_target = (payload.department or queue_entry.department).lower()
+            fb_stmt = select(Doctor).where(Doctor.department == dept_target).limit(1)
+            fb_res = await db.execute(fb_stmt)
+            doctor_obj = fb_res.scalar_one_or_none()
 
-    queue_entry.status = new_status
+        if doctor_obj:
+            queue_entry.doctor_id = doctor_obj.id
+            if queue_entry.visit_id:
+                v_stmt = select(Visit).where(Visit.id == queue_entry.visit_id)
+                v_res = await db.execute(v_stmt)
+                vis = v_res.scalar_one_or_none()
+                if vis:
+                    vis.doctor_id = doctor_obj.id
 
-    # Sync linked appointment status
-    if queue_entry.visit and queue_entry.visit.appointment_id:
-        apt_stmt = select(Appointment).where(Appointment.id == queue_entry.visit.appointment_id)
-        apt_res = await db.execute(apt_stmt)
-        apt = apt_res.scalar_one_or_none()
-        if apt:
-            if new_status == "Consulting" and apt.status != "Completed":
-                apt.status = "In progress"
-            elif new_status == "Completed":
-                apt.status = "Completed"
+    # 4. Update visit_type if provided
+    if payload.visit_type:
+        queue_entry.visit_type = payload.visit_type
+
+    # 5. Update note if provided
+    if payload.note is not None:
+        queue_entry.note = payload.note
+
+    # 6. Update vitals if provided
+    if payload.vitals and queue_entry.visit_id:
+        v_dict = payload.vitals.model_dump()
+        v_stmt = (
+            select(VitalsRecord)
+            .where(VitalsRecord.visit_id == queue_entry.visit_id)
+            .order_by(VitalsRecord.entered_at.desc())
+        )
+        v_res = await db.execute(v_stmt)
+        v_rec = v_res.scalar_one_or_none()
+        if v_rec:
+            v_rec.blood_pressure = str(v_dict.get("blood_pressure") or "")
+            v_rec.pulse = str(v_dict.get("pulse") or "")
+            v_rec.temperature = str(v_dict.get("temperature") or "")
+            v_rec.height = str(v_dict.get("height") or "")
+            v_rec.weight = str(v_dict.get("weight") or "")
+            v_rec.oxygen_saturation = str(v_dict.get("oxygen_saturation") or "")
+        else:
+            v_rec = VitalsRecord(
+                visit_id=queue_entry.visit_id,
+                blood_pressure=str(v_dict.get("blood_pressure") or ""),
+                pulse=str(v_dict.get("pulse") or ""),
+                temperature=str(v_dict.get("temperature") or ""),
+                height=str(v_dict.get("height") or ""),
+                weight=str(v_dict.get("weight") or ""),
+                oxygen_saturation=str(v_dict.get("oxygen_saturation") or ""),
+                entered_by=current_user.id,
+                entered_at=datetime.now(UTC),
+            )
+            db.add(v_rec)
+
+    # 7. Update patient phone / address / name if provided
+    if queue_entry.patient_id and (payload.patient_phone or payload.patient_address or payload.patient_full_name):
+        p_stmt = select(Patient).where(Patient.id == queue_entry.patient_id)
+        p_res = await db.execute(p_stmt)
+        pat = p_res.scalar_one_or_none()
+        if pat:
+            if payload.patient_phone:
+                pat.phone = payload.patient_phone.strip()
+            if payload.patient_address:
+                pat.address = payload.patient_address.strip()
+            if payload.patient_full_name:
+                pat.full_name = payload.patient_full_name.strip()
 
     await db.commit()
     await db.refresh(queue_entry)
 
+    await broadcast_event("QUEUE_UPDATE", {
+        "action": "edit",
+        "id": queue_entry.display_id,
+        "status": queue_entry.status,
+        "department": queue_entry.department,
+    })
+
     pay_stat = await compute_payment_status(db, queue_entry.visit_id)
-    v_stmt = select(VitalsRecord).where(VitalsRecord.visit_id == queue_entry.visit_id).order_by(VitalsRecord.entered_at.desc())
+    v_stmt = (
+        select(VitalsRecord)
+        .where(VitalsRecord.visit_id == queue_entry.visit_id)
+        .order_by(VitalsRecord.entered_at.desc())
+    )
     v_res = await db.execute(v_stmt)
     vitals_rec = v_res.scalar_one_or_none()
 

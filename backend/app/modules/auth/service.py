@@ -48,17 +48,23 @@ class AuthService:
                 user.failed_login_attempts = 0
 
         if not user or not user.is_active:
-            audit = AuditLog(
-                actor_user_id=None,
-                action="AUTH_LOGIN_FAILED",
-                entity_type="user",
-                entity_id=email,
-                after_state={"email": email, "reason": "user_not_found_or_inactive"},
-                ip=ip,
-                user_agent=user_agent,
-            )
-            self.repo.db.add(audit)
-            await self.repo.db.commit()
+            try:
+                audit = AuditLog(
+                    actor_user_id=None,
+                    action="AUTH_LOGIN_FAILED",
+                    entity_type="user",
+                    entity_id=email,
+                    after_state={"email": email, "reason": "user_not_found_or_inactive"},
+                    ip=ip,
+                    user_agent=user_agent,
+                )
+                self.repo.db.add(audit)
+                await self.repo.db.commit()
+            except Exception:
+                try:
+                    await self.repo.db.rollback()
+                except Exception:
+                    pass
             raise UnauthenticatedException("Invalid email or password.")
 
         if not verify_password(password, user.password_hash):
@@ -66,21 +72,27 @@ class AuthService:
             if user.failed_login_attempts >= 5:
                 user.locked_until = now + timedelta(minutes=15)
 
-            audit = AuditLog(
-                actor_user_id=user.id,
-                action="AUTH_LOGIN_FAILED",
-                entity_type="user",
-                entity_id=str(user.id),
-                after_state={
-                    "email": email,
-                    "failed_attempts": user.failed_login_attempts,
-                    "locked": bool(user.locked_until),
-                },
-                ip=ip,
-                user_agent=user_agent,
-            )
-            self.repo.db.add(audit)
-            await self.repo.db.commit()
+            try:
+                audit = AuditLog(
+                    actor_user_id=user.id,
+                    action="AUTH_LOGIN_FAILED",
+                    entity_type="user",
+                    entity_id=str(user.id),
+                    after_state={
+                        "email": email,
+                        "failed_attempts": user.failed_login_attempts,
+                        "locked": bool(user.locked_until),
+                    },
+                    ip=ip,
+                    user_agent=user_agent,
+                )
+                self.repo.db.add(audit)
+                await self.repo.db.commit()
+            except Exception:
+                try:
+                    await self.repo.db.rollback()
+                except Exception:
+                    pass
 
             if user.locked_until:
                 raise AppException(

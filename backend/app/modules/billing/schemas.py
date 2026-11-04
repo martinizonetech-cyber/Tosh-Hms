@@ -31,7 +31,8 @@ class ChargeItemResponse(CamelModel):
     amount: float  # In Rupees
     department: str
     added_by: str
-    date: str
+    date: str = ""
+    created_at: str | None = None
 
 
 class InvoiceResponse(CamelModel):
@@ -49,6 +50,7 @@ class InvoiceResponse(CamelModel):
     status: InvoiceStatusLiteral
     created_at: str
     date: str = ""
+
 
 
 class PaginatedInvoicesResponse(CamelModel):

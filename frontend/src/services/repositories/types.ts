@@ -1,10 +1,11 @@
 import type { Appointment, ChargeItem, Consultation, FollowUp, Invoice, NewAppointmentInput, NewFollowUpInput, Patient, PatientDocument, Payment, QueueEntry } from '../../types/domain';
-import type { AppointmentSearchParams, CreatePatientRequest, CreateQueueRequest, CreateVisitChargeRequest, DocumentSearchParams, FollowUpSearchParams, InvoiceSearchParams, PaginatedResponse, PatientSearchParams, QueueSearchParams, RecordPaymentRequest, ReportSummary, ReportSummaryRequest, SaveConsultationRequest, UpdateFollowUpRequest, UpdateQueueRequest } from '../api/contracts';
+import type { AppointmentSearchParams, CreatePatientRequest, CreateQueueRequest, CreateVisitChargeRequest, DocumentSearchParams, FollowUpSearchParams, InvoiceSearchParams, PaginatedResponse, PatientSearchParams, QueueSearchParams, RecordPaymentRequest, ReportSummary, ReportSummaryRequest, SaveConsultationRequest, UpdateFollowUpRequest, UpdatePatientRequest, UpdateQueueRequest } from '../api/contracts';
 
 /** Asynchronous boundary for a future backend adapter; never substitutes demo records on errors. */
 export interface HospitalRepository {
   listPatients(params?: PatientSearchParams): Promise<PaginatedResponse<Patient>>;
   createPatient(input: CreatePatientRequest): Promise<Patient>;
+  updatePatient(id: string, patch: UpdatePatientRequest): Promise<Patient>;
   listAppointments(params?: AppointmentSearchParams): Promise<PaginatedResponse<Appointment>>;
   scheduleAppointment(input: NewAppointmentInput): Promise<Appointment>;
   updateAppointment(id: string, patch: Partial<Appointment>): Promise<Appointment>;

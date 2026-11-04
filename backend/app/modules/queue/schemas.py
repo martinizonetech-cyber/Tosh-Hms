@@ -29,7 +29,15 @@ class CreateQueueRequest(CamelModel):
 
 
 class UpdateQueueRequest(CamelModel):
-    status: QueueStatusLiteral
+    status: QueueStatusLiteral | None = None
+    department: DepartmentLiteral | None = None
+    doctor: str | None = None
+    visit_type: VisitTypeLiteral | None = None
+    note: str | None = Field(default=None, max_length=500)
+    vitals: VitalsSchema | None = None
+    patient_phone: str | None = None
+    patient_full_name: str | None = None
+    patient_address: str | None = None
 
 
 class QueueEntryResponse(CamelModel):

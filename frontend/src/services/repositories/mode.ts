@@ -2,7 +2,23 @@ export type DataMode = 'mock' | 'api';
 
 const configuredMode = import.meta.env.VITE_DATA_MODE;
 export const DATA_MODE: DataMode = configuredMode === 'mock' ? 'mock' : 'api';
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api/v1').replace(/\/$/, '');
+function resolveApiBaseUrl(): string {
+  const envUrl = (import.meta.env.VITE_API_BASE_URL || '').trim();
+  if (!envUrl) {
+    // Relative path defaults to Vite /api proxy for seamless local & network development
+    return '/api/v1';
+  }
+  const clean = envUrl.replace(/\/+$/, '');
+  if (!clean.endsWith('/api/v1')) {
+    if (clean.endsWith('/api')) {
+      return `${clean}/v1`;
+    }
+    return `${clean}/api/v1`;
+  }
+  return clean;
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 export class DemoModeRequiredError extends Error {
   constructor() {

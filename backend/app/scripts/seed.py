@@ -4,6 +4,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import hash_password
@@ -129,23 +130,56 @@ BODY_REGION_TEMPLATES = [
 ]
 
 
-async def seed_database() -> None:
+async def seed_database(session: AsyncSession | None = None, clean: bool = False) -> None:
     print("[SEED] Starting database seeding...")
-    async with async_session_factory() as session:
-        # 1. Clean existing records in correct topological order
-        print("Cleaning previous records...")
-        table_names = [f'"{table.name}"' for table in Base.metadata.sorted_tables]
-        await session.execute(text(f"TRUNCATE TABLE {', '.join(table_names)} CASCADE;"))
-        await session.flush()
+    if session is not None:
+        await _seed_with_session(session, clean=clean)
+    else:
+        async with async_session_factory() as s:
+            await _seed_with_session(s, clean=clean)
 
-        # 2. Staff Users & Doctors
-        print("Seeding staff accounts and doctors...")
-        reception_pw = settings.RECEPTION_INITIAL_PASSWORD
-        skin_pw = settings.SKIN_INITIAL_PASSWORD
-        ortho_pw = settings.ORTHO_INITIAL_PASSWORD
-        if not reception_pw or not skin_pw or not ortho_pw:
-            raise ValueError("Initial staff passwords must be configured in environment / backend/.env")
 
+async def _seed_with_session(session: AsyncSession, clean: bool = False) -> None:
+    # 1. Clean existing records if requested
+    if clean:
+        try:
+            bind = session.bind
+            is_sqlite = (bind.dialect.name == "sqlite") if bind else settings.DATABASE_URL.startswith("sqlite")
+            if is_sqlite:
+                for table in reversed(Base.metadata.sorted_tables):
+                    try:
+                        await session.execute(text(f'DELETE FROM "{table.name}";'))
+                    except Exception:
+                        pass
+            else:
+                tbls = [f'"{table.name}"' for table in Base.metadata.sorted_tables]
+                try:
+                    await session.execute(text(f"TRUNCATE TABLE {', '.join(tbls)} CASCADE;"))
+                except Exception:
+                    pass
+            await session.flush()
+        except Exception:
+            pass
+
+    # 2. Staff Users & Doctors
+    print("Seeding staff accounts and doctors...")
+    initial_pw = "123456789"
+    reception_pw = settings.RECEPTION_INITIAL_PASSWORD or initial_pw
+    skin_pw = settings.SKIN_INITIAL_PASSWORD or initial_pw
+    ortho_pw = settings.ORTHO_INITIAL_PASSWORD or initial_pw
+
+    # Check if staff accounts already exist
+    from sqlalchemy import select
+    res_users = await session.execute(
+        select(User).where(User.email.in_(["reception@gmail.com", "skin@gmail.com", "ortho@gmail.com"]))
+    )
+    existing_users = {u.email: u for u in res_users.scalars().all()}
+
+    reception_user = existing_users.get("reception@gmail.com")
+    if reception_user:
+        reception_user.password_hash = hash_password(reception_pw)
+        reception_user.must_change_password = False
+    else:
         reception_user = User(
             email="reception@gmail.com",
             password_hash=hash_password(reception_pw),
@@ -153,8 +187,15 @@ async def seed_database() -> None:
             display_name="Reception Desk",
             department=None,
             is_active=True,
-            must_change_password=True,
+            must_change_password=False,
         )
+        session.add(reception_user)
+
+    skin_user = existing_users.get("skin@gmail.com")
+    if skin_user:
+        skin_user.password_hash = hash_password(skin_pw)
+        skin_user.must_change_password = False
+    else:
         skin_user = User(
             email="skin@gmail.com",
             password_hash=hash_password(skin_pw),
@@ -162,8 +203,15 @@ async def seed_database() -> None:
             display_name="Dr. Sangamitra",
             department="skin",
             is_active=True,
-            must_change_password=True,
+            must_change_password=False,
         )
+        session.add(skin_user)
+
+    ortho_user = existing_users.get("ortho@gmail.com")
+    if ortho_user:
+        ortho_user.password_hash = hash_password(ortho_pw)
+        ortho_user.must_change_password = False
+    else:
         ortho_user = User(
             email="ortho@gmail.com",
             password_hash=hash_password(ortho_pw),
@@ -171,313 +219,318 @@ async def seed_database() -> None:
             display_name="Dr. Sundarprakash",
             department="orthopaedics",
             is_active=True,
-            must_change_password=True,
+            must_change_password=False,
         )
-        session.add_all([reception_user, skin_user, ortho_user])
-        await session.flush()
+        session.add(ortho_user)
 
+    await session.flush()
+
+    res_docs = await session.execute(select(Doctor).where(Doctor.department.in_(["skin", "orthopaedics"])))
+    existing_docs = {d.department: d for d in res_docs.scalars().all()}
+
+    doc_skin = existing_docs.get("skin")
+    if not doc_skin:
         doc_skin = Doctor(
             user_id=skin_user.id,
             display_name="Dr. Sangamitra",
             department="skin",
         )
+        session.add(doc_skin)
+
+    doc_ortho = existing_docs.get("orthopaedics")
+    if not doc_ortho:
         doc_ortho = Doctor(
             user_id=ortho_user.id,
             display_name="Dr. Sundarprakash",
             department="orthopaedics",
         )
-        session.add_all([doc_skin, doc_ortho])
-        await session.flush()
+        session.add(doc_ortho)
 
-        # 3. Fee Settings
-        print("Seeding fee settings...")
-        fee_skin = FeeSetting(department="skin", amount=70000, currency="INR")
-        fee_ortho = FeeSetting(department="orthopaedics", amount=90000, currency="INR")
-        session.add_all([fee_skin, fee_ortho])
+    await session.flush()
 
-        # 4. Charge Catalog
-        print("Seeding charge catalog...")
-        for item in CATALOG_ITEMS:
-            session.add(ChargeCatalogItem(**item))
+    # 3. Fee Settings
+    print("Seeding fee settings...")
+    fee_skin = FeeSetting(department="skin", amount=70000, currency="INR")
+    fee_ortho = FeeSetting(department="orthopaedics", amount=90000, currency="INR")
+    session.add_all([fee_skin, fee_ortho])
 
-        # 5. Body Region Templates
-        print("Seeding body region templates...")
-        for tmpl in BODY_REGION_TEMPLATES:
-            session.add(BodyRegionTemplate(**tmpl))
+    # 4. Charge Catalog
+    print("Seeding charge catalog...")
+    for item in CATALOG_ITEMS:
+        session.add(ChargeCatalogItem(**item))
 
-        await session.flush()
+    # 5. Body Region Templates
+    print("Seeding body region templates...")
+    for tmpl in BODY_REGION_TEMPLATES:
+        session.add(BodyRegionTemplate(**tmpl))
+    await session.flush()
 
-        # 6. Patients
-        print("Seeding patients...")
-        patients_data: list[dict[str, Any]] = [
-            {"display_id": "PT-2041", "full_name": "Aarav Mehta", "date_of_birth": "1993-06-14", "gender": "Male", "phone": "+91 98765 41021", "email": "aarav.mehta@example.test", "address": "12 Lakeview Road, Pune", "emergency_contact": "+91 98765 41022", "registered_at": at(-42, 9), "latest_visit_at": at(-18, 10)},
-            {"display_id": "PT-2042", "full_name": "Mira Shah", "date_of_birth": "1987-11-03", "gender": "Female", "phone": "+91 98220 34108", "email": "mira.shah@example.test", "address": "8 Cedar Avenue, Pune", "registered_at": at(-36, 11), "latest_visit_at": at(-12, 11)},
-            {"display_id": "PT-2043", "full_name": "Ishaan Rao", "date_of_birth": "2000-02-20", "gender": "Male", "phone": "+91 97655 11870", "address": "44 Park Street, Pune", "registered_at": at(-23, 12), "latest_visit_at": at(-6, 9)},
-            {"display_id": "PT-2044", "full_name": "Ananya Iyer", "date_of_birth": "1979-09-08", "gender": "Female", "phone": "+91 98901 77214", "email": "ananya.iyer@example.test", "address": "29 Willow Lane, Pune", "registered_at": at(-14, 15), "latest_visit_at": at(-3, 14)},
-            {"display_id": "PT-2045", "full_name": "Kabir Nair", "date_of_birth": "1996-03-25", "gender": "Male", "phone": "+91 99701 62542", "email": "kabir.nair@example.test", "address": "5 Riverside Walk, Pune", "registered_at": at(-9, 10), "latest_visit_at": at(-2, 16)},
-            {"display_id": "PT-2046", "full_name": "Leena Kapoor", "date_of_birth": "1968-12-17", "gender": "Female", "phone": "+91 98190 56231", "address": "19 Garden View, Pune", "registered_at": at(-7, 13), "latest_visit_at": at(-1, 10)},
-            {"display_id": "PT-2047", "full_name": "Devika Menon", "date_of_birth": "1990-08-30", "gender": "Female", "phone": "+91 99870 22615", "email": "devika.menon@example.test", "address": "63 Hillcrest, Pune", "registered_at": at(-4, 11)},
-            {"display_id": "PT-2048", "full_name": "Rohan Desai", "date_of_birth": "1984-01-12", "gender": "Male", "phone": "+91 98600 39941", "address": "7 Orchard Road, Pune", "registered_at": at(-2, 9)},
-        ]
+    # 6. Patients
+    print("Seeding patients...")
+    patients_data: list[dict[str, Any]] = [
+        {"display_id": "PT-2041", "full_name": "Aarav Mehta", "date_of_birth": "1993-06-14", "gender": "Male", "phone": "+91 98765 41021", "email": "aarav.mehta@example.test", "address": "12 Lakeview Road, Pune", "emergency_contact": "+91 98765 41022", "registered_at": at(-42, 9), "latest_visit_at": at(-18, 10)},
+        {"display_id": "PT-2042", "full_name": "Mira Shah", "date_of_birth": "1987-11-03", "gender": "Female", "phone": "+91 98220 34108", "email": "mira.shah@example.test", "address": "8 Cedar Avenue, Pune", "registered_at": at(-36, 11), "latest_visit_at": at(-12, 11)},
+        {"display_id": "PT-2043", "full_name": "Ishaan Rao", "date_of_birth": "2000-02-20", "gender": "Male", "phone": "+91 97655 11870", "address": "44 Park Street, Pune", "registered_at": at(-23, 12), "latest_visit_at": at(-6, 9)},
+        {"display_id": "PT-2044", "full_name": "Ananya Iyer", "date_of_birth": "1979-09-08", "gender": "Female", "phone": "+91 98901 77214", "email": "ananya.iyer@example.test", "address": "29 Willow Lane, Pune", "registered_at": at(-14, 15), "latest_visit_at": at(-3, 14)},
+        {"display_id": "PT-2045", "full_name": "Kabir Nair", "date_of_birth": "1996-03-25", "gender": "Male", "phone": "+91 99701 62542", "email": "kabir.nair@example.test", "address": "5 Riverside Walk, Pune", "registered_at": at(-9, 10), "latest_visit_at": at(-2, 16)},
+        {"display_id": "PT-2046", "full_name": "Leena Kapoor", "date_of_birth": "1968-12-17", "gender": "Female", "phone": "+91 98190 56231", "address": "19 Garden View, Pune", "registered_at": at(-7, 13), "latest_visit_at": at(-1, 10)},
+        {"display_id": "PT-2047", "full_name": "Devika Menon", "date_of_birth": "1990-08-30", "gender": "Female", "phone": "+91 99870 22615", "email": "devika.menon@example.test", "address": "63 Hillcrest, Pune", "registered_at": at(-4, 11)},
+        {"display_id": "PT-2048", "full_name": "Rohan Desai", "date_of_birth": "1984-01-12", "gender": "Male", "phone": "+91 98600 39941", "address": "7 Orchard Road, Pune", "registered_at": at(-2, 9)},
+    ]
 
-        patient_map: dict[str, Patient] = {}
-        for p_data in patients_data:
-            p = Patient(**p_data)
-            session.add(p)
-            patient_map[p_data["display_id"]] = p
+    patient_map: dict[str, Patient] = {}
+    for p_data in patients_data:
+        p = Patient(**p_data)
+        session.add(p)
+        patient_map[p_data["display_id"]] = p
+    await session.flush()
 
-        await session.flush()
+    # 7. Appointments
+    print("Seeding appointments...")
+    appts_data: list[dict[str, Any]] = [
+        {"display_id": "APT-7201", "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "starts_at": at(0, 9, 30), "visit_type": "Follow-up", "note": "Review skin-care routine", "status": "Checked-in"},
+        {"display_id": "APT-7202", "patient_display": "PT-2042", "dept": "orthopaedics", "doc": doc_ortho, "starts_at": at(0, 10), "visit_type": "Follow-up", "note": "Knee mobility review", "status": "Scheduled"},
+        {"display_id": "APT-7203", "patient_display": "PT-2043", "dept": "skin", "doc": doc_skin, "starts_at": at(0, 10, 30), "visit_type": "New", "note": "", "status": "Scheduled"},
+        {"display_id": "APT-7204", "patient_display": "PT-2044", "dept": "orthopaedics", "doc": doc_ortho, "starts_at": at(0, 11), "visit_type": "Follow-up", "note": "Shoulder symptoms", "status": "In progress"},
+        {"display_id": "APT-7205", "patient_display": "PT-2045", "dept": "skin", "doc": doc_skin, "starts_at": at(0, 12), "visit_type": "Walk-in", "note": "Itching; clinician review", "status": "Scheduled"},
+        {"display_id": "APT-7206", "patient_display": "PT-2046", "dept": "orthopaedics", "doc": doc_ortho, "starts_at": at(0, 12, 30), "visit_type": "New", "note": "", "status": "Scheduled"},
+        {"display_id": "APT-7207", "patient_display": "PT-2047", "dept": "skin", "doc": doc_skin, "starts_at": at(0, 14), "visit_type": "New", "note": "", "status": "Scheduled"},
+        {"display_id": "APT-7208", "patient_display": "PT-2048", "dept": "orthopaedics", "doc": doc_ortho, "starts_at": at(0, 15), "visit_type": "Follow-up", "note": "Review current symptoms", "status": "Scheduled"},
+        {"display_id": "APT-7209", "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "starts_at": at(2, 10), "visit_type": "Follow-up", "note": "Future follow-up demo", "status": "Scheduled"},
+    ]
 
-        # 7. Appointments
-        print("Seeding appointments...")
-        appts_data: list[dict[str, Any]] = [
-            {"display_id": "APT-7201", "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "starts_at": at(0, 9, 30), "visit_type": "Follow-up", "note": "Review skin-care routine", "status": "Checked-in"},
-            {"display_id": "APT-7202", "patient_display": "PT-2042", "dept": "orthopaedics", "doc": doc_ortho, "starts_at": at(0, 10), "visit_type": "Follow-up", "note": "Knee mobility review", "status": "Scheduled"},
-            {"display_id": "APT-7203", "patient_display": "PT-2043", "dept": "skin", "doc": doc_skin, "starts_at": at(0, 10, 30), "visit_type": "New", "note": "", "status": "Scheduled"},
-            {"display_id": "APT-7204", "patient_display": "PT-2044", "dept": "orthopaedics", "doc": doc_ortho, "starts_at": at(0, 11), "visit_type": "Follow-up", "note": "Shoulder symptoms", "status": "In progress"},
-            {"display_id": "APT-7205", "patient_display": "PT-2045", "dept": "skin", "doc": doc_skin, "starts_at": at(0, 12), "visit_type": "Walk-in", "note": "Itching; clinician review", "status": "Scheduled"},
-            {"display_id": "APT-7206", "patient_display": "PT-2046", "dept": "orthopaedics", "doc": doc_ortho, "starts_at": at(0, 12, 30), "visit_type": "New", "note": "", "status": "Scheduled"},
-            {"display_id": "APT-7207", "patient_display": "PT-2047", "dept": "skin", "doc": doc_skin, "starts_at": at(0, 14), "visit_type": "New", "note": "", "status": "Scheduled"},
-            {"display_id": "APT-7208", "patient_display": "PT-2048", "dept": "orthopaedics", "doc": doc_ortho, "starts_at": at(0, 15), "visit_type": "Follow-up", "note": "Review current symptoms", "status": "Scheduled"},
-            {"display_id": "APT-7209", "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "starts_at": at(2, 10), "visit_type": "Follow-up", "note": "Future follow-up demo", "status": "Scheduled"},
-        ]
-
-        appt_map: dict[str, Appointment] = {}
-        for a in appts_data:
-            appt = Appointment(
-                display_id=a["display_id"],
-                patient_id=patient_map[a["patient_display"]].id,
-                department=a["dept"],
-                doctor_id=a["doc"].id,
-                starts_at=a["starts_at"],
-                visit_type=a["visit_type"],
-                note=a["note"],
-                status=a["status"],
-                created_by=reception_user.id,
-            )
-            session.add(appt)
-            appt_map[a["display_id"]] = appt
-
-        await session.flush()
-
-        # 8. Visits & Vitals
-        print("Seeding visits & vitals...")
-        visits_data: list[dict[str, Any]] = [
-            {"display_id": "VIS-8801", "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "appt": appt_map["APT-7201"], "started_at": at(0, 9, 12), "visit_type": "Follow-up"},
-            {"display_id": "VIS-8802", "patient_display": "PT-2042", "dept": "orthopaedics", "doc": doc_ortho, "appt": appt_map["APT-7202"], "started_at": at(-12, 11), "visit_type": "Follow-up"},
-            {"display_id": "VIS-8803", "patient_display": "PT-2043", "dept": "skin", "doc": doc_skin, "appt": None, "started_at": at(-6, 9), "visit_type": "New"},
-            {"display_id": "VIS-8804", "patient_display": "PT-2044", "dept": "orthopaedics", "doc": doc_ortho, "appt": appt_map["APT-7204"], "started_at": at(0, 9, 25), "visit_type": "Follow-up"},
-        ]
-
-        visit_map: dict[str, Visit] = {}
-        for v in visits_data:
-            vis = Visit(
-                display_id=v["display_id"],
-                patient_id=patient_map[v["patient_display"]].id,
-                department=v["dept"],
-                doctor_id=v["doc"].id,
-                appointment_id=v["appt"].id if v["appt"] else None,
-                visit_type=v["visit_type"],
-                started_at=v["started_at"],
-            )
-            session.add(vis)
-            visit_map[v["display_id"]] = vis
-
-        await session.flush()
-
-        # Add vitals for each visit
-        for vis in visit_map.values():
-            session.add(VitalsRecord(
-                visit_id=vis.id,
-                blood_pressure=DEFAULT_VITALS["blood_pressure"],
-                pulse=DEFAULT_VITALS["pulse"],
-                temperature=DEFAULT_VITALS["temperature"],
-                height=DEFAULT_VITALS["height"],
-                weight=DEFAULT_VITALS["weight"],
-                oxygen_saturation=DEFAULT_VITALS["oxygen_saturation"],
-                entered_by=reception_user.id,
-                entered_at=vis.started_at,
-            ))
-
-        # 9. Queue Entries
-        print("Seeding queue entries...")
-        q_entries: list[dict[str, Any]] = [
-            {"display_id": "Q-5101", "token": "S-018", "vis": visit_map["VIS-8801"], "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "arrival_at": at(0, 9, 12), "status": "Waiting", "visit_type": "Follow-up", "note": "Review skin-care routine"},
-            {"display_id": "Q-5102", "token": "O-011", "vis": visit_map["VIS-8804"], "patient_display": "PT-2044", "dept": "orthopaedics", "doc": doc_ortho, "arrival_at": at(0, 9, 25), "status": "Consulting", "visit_type": "Follow-up", "note": "Shoulder symptoms"},
-            {"display_id": "Q-5103", "token": "S-019", "vis": visit_map["VIS-8803"], "patient_display": "PT-2045", "dept": "skin", "doc": doc_skin, "arrival_at": at(0, 9, 41), "status": "Waiting", "visit_type": "Walk-in", "note": "Itching; clinician review"},
-        ]
-
-        for q in q_entries:
-            session.add(QueueEntry(
-                display_id=q["display_id"],
-                token=q["token"],
-                visit_id=q["vis"].id,
-                patient_id=patient_map[q["patient_display"]].id,
-                department=q["dept"],
-                doctor_id=q["doc"].id,
-                arrival_at=q["arrival_at"],
-                status=q["status"],
-                visit_type=q["visit_type"],
-                note=q["note"],
-            ))
-
-        # 10. Consultations & Prescriptions
-        print("Seeding consultations...")
-        c1 = Consultation(
-            id=visit_map["VIS-8801"].id,
-            visit_id=visit_map["VIS-8801"].id,
-            patient_id=patient_map["PT-2041"].id,
-            department="skin",
-            symptoms="Intermittent dryness on both cheeks for three weeks.",
-            medical_history="No significant history reported.",
-            allergies="No known drug allergies.",
-            examination="Mild erythema; skin intact.",
-            assessment="Dryness with mild irritation.",
-            diagnosis="Irritant contact dermatitis",
-            treatment_plan="Gentle skin-care routine; review in four weeks.",
-            follow_up_date=iso_day(9),
-            status="Finalized",
-            finalized_at=at(0, 9, 30),
-            finalized_by=skin_user.id,
+    appt_map: dict[str, Appointment] = {}
+    for a in appts_data:
+        appt = Appointment(
+            display_id=a["display_id"],
+            patient_id=patient_map[a["patient_display"]].id,
+            department=a["dept"],
+            doctor_id=a["doc"].id,
+            starts_at=a["starts_at"],
+            visit_type=a["visit_type"],
+            note=a["note"],
+            status=a["status"],
+            created_by=reception_user.id,
         )
-        session.add(c1)
-        session.add(PrescriptionItem(
-            display_id="RX-1",
-            consultation_id=c1.id,
-            medicine_name="Moisturizer (doctor-entered)",
-            strength="—",
-            dosage="Apply a thin layer",
-            route="Topical",
-            frequency="As directed",
-            duration="To be confirmed",
-            instructions="Use only as directed by the clinician.",
-            sort_order=0,
+        session.add(appt)
+        appt_map[a["display_id"]] = appt
+    await session.flush()
+
+    # 8. Visits & Vitals
+    print("Seeding visits & vitals...")
+    visits_data: list[dict[str, Any]] = [
+        {"display_id": "VIS-8801", "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "appt": appt_map["APT-7201"], "started_at": at(0, 9, 12), "visit_type": "Follow-up"},
+        {"display_id": "VIS-8802", "patient_display": "PT-2042", "dept": "orthopaedics", "doc": doc_ortho, "appt": appt_map["APT-7202"], "started_at": at(-12, 11), "visit_type": "Follow-up"},
+        {"display_id": "VIS-8803", "patient_display": "PT-2043", "dept": "skin", "doc": doc_skin, "appt": None, "started_at": at(-6, 9), "visit_type": "New"},
+        {"display_id": "VIS-8804", "patient_display": "PT-2044", "dept": "orthopaedics", "doc": doc_ortho, "appt": appt_map["APT-7204"], "started_at": at(0, 9, 25), "visit_type": "Follow-up"},
+    ]
+
+    visit_map: dict[str, Visit] = {}
+    for v in visits_data:
+        vis = Visit(
+            display_id=v["display_id"],
+            patient_id=patient_map[v["patient_display"]].id,
+            department=v["dept"],
+            doctor_id=v["doc"].id,
+            appointment_id=v["appt"].id if v["appt"] else None,
+            visit_type=v["visit_type"],
+            started_at=v["started_at"],
+        )
+        session.add(vis)
+        visit_map[v["display_id"]] = vis
+    await session.flush()
+
+    # Add vitals for each visit
+    for vis in visit_map.values():
+        session.add(VitalsRecord(
+            visit_id=vis.id,
+            blood_pressure=DEFAULT_VITALS["blood_pressure"],
+            pulse=DEFAULT_VITALS["pulse"],
+            temperature=DEFAULT_VITALS["temperature"],
+            height=DEFAULT_VITALS["height"],
+            weight=DEFAULT_VITALS["weight"],
+            oxygen_saturation=DEFAULT_VITALS["oxygen_saturation"],
+            entered_by=reception_user.id,
+            entered_at=vis.started_at,
         ))
 
-        c2 = Consultation(
-            id=visit_map["VIS-8802"].id,
-            visit_id=visit_map["VIS-8802"].id,
-            patient_id=patient_map["PT-2042"].id,
-            department="orthopaedics",
-            symptoms="Right knee discomfort when using stairs.",
-            medical_history="Occasional recreational walking.",
-            allergies="No known allergies reported.",
-            examination="Range of motion recorded for clinician review.",
-            assessment="Symptoms require clinical assessment.",
-            diagnosis="Pending clinician entry",
-            treatment_plan="Pending clinician entry.",
-            pain_location="Anterior right knee",
-            side="Right",
-            status="Finalized",
-            finalized_at=at(-12, 11, 30),
-            finalized_by=ortho_user.id,
-        )
-        session.add(c2)
+    # 9. Queue Entries
+    print("Seeding queue entries...")
+    q_entries: list[dict[str, Any]] = [
+        {"display_id": "Q-5101", "token": "S-018", "vis": visit_map["VIS-8801"], "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "arrival_at": at(0, 9, 12), "status": "Waiting", "visit_type": "Follow-up", "note": "Review skin-care routine"},
+        {"display_id": "Q-5102", "token": "O-011", "vis": visit_map["VIS-8804"], "patient_display": "PT-2044", "dept": "orthopaedics", "doc": doc_ortho, "arrival_at": at(0, 9, 25), "status": "Consulting", "visit_type": "Follow-up", "note": "Shoulder symptoms"},
+        {"display_id": "Q-5103", "token": "S-019", "vis": visit_map["VIS-8803"], "patient_display": "PT-2045", "dept": "skin", "doc": doc_skin, "arrival_at": at(0, 9, 41), "status": "Waiting", "visit_type": "Walk-in", "note": "Itching; clinician review"},
+    ]
 
-        c3 = Consultation(
-            id=visit_map["VIS-8803"].id,
-            visit_id=visit_map["VIS-8803"].id,
-            patient_id=patient_map["PT-2043"].id,
-            department="skin",
-            symptoms="Occasional scalp itching; patient reports recent product change.",
-            medical_history="No significant history reported.",
-            allergies="Seasonal pollen sensitivity reported.",
-            examination="No open lesions noted in demo record.",
-            diagnosis="",
-            status="Draft",
-        )
-        session.add(c3)
-
-        c4 = Consultation(
-            id=visit_map["VIS-8804"].id,
-            visit_id=visit_map["VIS-8804"].id,
-            patient_id=patient_map["PT-2044"].id,
-            department="orthopaedics",
-            symptoms="Left shoulder stiffness after activity.",
-            medical_history="No significant history reported.",
-            allergies="Not recorded.",
-            pain_location="Left shoulder",
-            side="Left",
-            status="Draft",
-        )
-        session.add(c4)
-
-        # 11. Invoices, Charges, Payments
-        print("Seeding invoices, charges, and payments...")
-        inv1 = Invoice(
-            display_id="INV-3401",
-            patient_id=patient_map["PT-2041"].id,
-            visit_id=visit_map["VIS-8801"].id,
-            department="skin",
-            visit_label="Skin consultation · APT-7201",
-            consultation_fee=70000,
-            created_at=at(0, 9, 30),
-        )
-        inv2 = Invoice(
-            display_id="INV-3402",
-            patient_id=patient_map["PT-2042"].id,
-            visit_id=visit_map["VIS-8802"].id,
-            department="orthopaedics",
-            visit_label="Orthopaedics follow-up · APT-7202",
-            consultation_fee=90000,
-            created_at=at(0, 10),
-        )
-        inv3 = Invoice(
-            display_id="INV-3403",
-            patient_id=patient_map["PT-2044"].id,
-            visit_id=visit_map["VIS-8804"].id,
-            department="orthopaedics",
-            visit_label="Orthopaedics consultation · APT-7204",
-            consultation_fee=90000,
-            created_at=at(0, 11),
-        )
-        session.add_all([inv1, inv2, inv3])
-        await session.flush()
-
-        # Charges & Payments on Invoice 2
-        session.add(InvoiceCharge(
-            display_id="CH-10",
-            invoice_id=inv2.id,
-            description="Support assessment",
-            amount=35000,  # ₹350
-            added_by="Dr. Sundarprakash",
-            created_at=at(0, 8),
-        ))
-        session.add(Payment(
-            display_id="PAY-11",
-            invoice_id=inv2.id,
-            amount=50000,  # ₹500
-            method="UPI",
-            transaction_reference="DEMO-UPI-4418",
-            paid_at=at(0, 8, 10),
-            recorded_by=reception_user.id,
+    for q in q_entries:
+        session.add(QueueEntry(
+            display_id=q["display_id"],
+            token=q["token"],
+            visit_id=q["vis"].id,
+            patient_id=patient_map[q["patient_display"]].id,
+            department=q["dept"],
+            doctor_id=q["doc"].id,
+            arrival_at=q["arrival_at"],
+            status=q["status"],
+            visit_type=q["visit_type"],
+            note=q["note"],
         ))
 
-        # Invoice 3 starts unpaid (Due) for reception workflow
+    # 10. Consultations & Prescriptions
+    print("Seeding consultations...")
+    c1 = Consultation(
+        id=visit_map["VIS-8801"].id,
+        visit_id=visit_map["VIS-8801"].id,
+        patient_id=patient_map["PT-2041"].id,
+        department="skin",
+        symptoms="Intermittent dryness on both cheeks for three weeks.",
+        medical_history="No significant history reported.",
+        allergies="No known drug allergies.",
+        examination="Mild erythema; skin intact.",
+        assessment="Dryness with mild irritation.",
+        diagnosis="Irritant contact dermatitis",
+        treatment_plan="Gentle skin-care routine; review in four weeks.",
+        follow_up_date=iso_day(9),
+        status="Finalized",
+        finalized_at=at(0, 9, 30),
+        finalized_by=skin_user.id,
+    )
+    session.add(c1)
+    session.add(PrescriptionItem(
+        display_id="RX-1",
+        consultation_id=c1.id,
+        medicine_name="Moisturizer (doctor-entered)",
+        strength="—",
+        dosage="Apply a thin layer",
+        route="Topical",
+        frequency="As directed",
+        duration="To be confirmed",
+        instructions="Use only as directed by the clinician.",
+        sort_order=0,
+    ))
 
-        # 12. Follow-ups
-        print("Seeding follow-ups...")
-        fu_data: list[dict[str, Any]] = [
-            {"display_id": "FU-2101", "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "date": iso_day(9), "status": "Upcoming", "reminder_status": "Not sent", "note": "Review skin-care routine"},
-            {"display_id": "FU-2102", "patient_display": "PT-2042", "dept": "orthopaedics", "doc": doc_ortho, "date": iso_day(0), "status": "Upcoming", "reminder_status": "Queued", "note": "Knee mobility review"},
-            {"display_id": "FU-2103", "patient_display": "PT-2045", "dept": "skin", "doc": doc_skin, "date": iso_day(-2), "status": "Overdue", "reminder_status": "Not sent", "note": "Follow-up pending"},
-            {"display_id": "FU-2104", "patient_display": "PT-2046", "dept": "orthopaedics", "doc": doc_ortho, "date": iso_day(14), "status": "Upcoming", "reminder_status": "Not sent", "note": "Review current symptoms"},
-        ]
+    c2 = Consultation(
+        id=visit_map["VIS-8802"].id,
+        visit_id=visit_map["VIS-8802"].id,
+        patient_id=patient_map["PT-2042"].id,
+        department="orthopaedics",
+        symptoms="Right knee discomfort when using stairs.",
+        medical_history="Occasional recreational walking.",
+        allergies="No known allergies reported.",
+        examination="Range of motion recorded for clinician review.",
+        assessment="Symptoms require clinical assessment.",
+        diagnosis="Pending clinician entry",
+        treatment_plan="Pending clinician entry.",
+        pain_location="Anterior right knee",
+        side="Right",
+        status="Finalized",
+        finalized_at=at(-12, 11, 30),
+        finalized_by=ortho_user.id,
+    )
+    session.add(c2)
 
-        for fu in fu_data:
-            session.add(FollowUp(
-                display_id=fu["display_id"],
-                patient_id=patient_map[fu["patient_display"]].id,
-                department=fu["dept"],
-                doctor_id=fu["doc"].id,
-                date=fu["date"],
-                status=fu["status"],
-                reminder_status=fu["reminder_status"],
-                note=fu["note"],
-            ))
+    c3 = Consultation(
+        id=visit_map["VIS-8803"].id,
+        visit_id=visit_map["VIS-8803"].id,
+        patient_id=patient_map["PT-2043"].id,
+        department="skin",
+        symptoms="Occasional scalp itching; patient reports recent product change.",
+        medical_history="No significant history reported.",
+        allergies="Seasonal pollen sensitivity reported.",
+        examination="No open lesions noted in demo record.",
+        diagnosis="",
+        status="Draft",
+    )
+    session.add(c3)
 
-        await session.commit()
-        print("[SUCCESS] Database seeding successfully finished!")
+    c4 = Consultation(
+        id=visit_map["VIS-8804"].id,
+        visit_id=visit_map["VIS-8804"].id,
+        patient_id=patient_map["PT-2044"].id,
+        department="orthopaedics",
+        symptoms="Left shoulder stiffness after activity.",
+        medical_history="No significant history reported.",
+        allergies="Not recorded.",
+        pain_location="Left shoulder",
+        side="Left",
+        status="Draft",
+    )
+    session.add(c4)
+
+    # 11. Invoices, Charges, Payments
+    print("Seeding invoices, charges, and payments...")
+    inv1 = Invoice(
+        display_id="INV-3401",
+        patient_id=patient_map["PT-2041"].id,
+        visit_id=visit_map["VIS-8801"].id,
+        department="skin",
+        visit_label="Skin consultation · APT-7201",
+        consultation_fee=70000,
+        created_at=at(0, 9, 30),
+    )
+    inv2 = Invoice(
+        display_id="INV-3402",
+        patient_id=patient_map["PT-2042"].id,
+        visit_id=visit_map["VIS-8802"].id,
+        department="orthopaedics",
+        visit_label="Orthopaedics follow-up · APT-7202",
+        consultation_fee=90000,
+        created_at=at(0, 10),
+    )
+    inv3 = Invoice(
+        display_id="INV-3403",
+        patient_id=patient_map["PT-2044"].id,
+        visit_id=visit_map["VIS-8804"].id,
+        department="orthopaedics",
+        visit_label="Orthopaedics consultation · APT-7204",
+        consultation_fee=90000,
+        created_at=at(0, 11),
+    )
+    session.add_all([inv1, inv2, inv3])
+    await session.flush()
+
+    # Charges & Payments on Invoice 2
+    session.add(InvoiceCharge(
+        display_id="CH-10",
+        invoice_id=inv2.id,
+        description="Support assessment",
+        amount=35000,  # ₹350
+        added_by="Dr. Sundarprakash",
+        created_at=at(0, 8),
+    ))
+    session.add(Payment(
+        display_id="PAY-11",
+        invoice_id=inv2.id,
+        amount=50000,  # ₹500
+        method="UPI",
+        transaction_reference="DEMO-UPI-4418",
+        paid_at=at(0, 8, 10),
+        recorded_by=reception_user.id,
+    ))
+
+    # 12. Follow-ups
+    print("Seeding follow-ups...")
+    fu_data: list[dict[str, Any]] = [
+        {"display_id": "FU-2101", "patient_display": "PT-2041", "dept": "skin", "doc": doc_skin, "date": iso_day(9), "status": "Upcoming", "reminder_status": "Not sent", "note": "Review skin-care routine"},
+        {"display_id": "FU-2102", "patient_display": "PT-2042", "dept": "orthopaedics", "doc": doc_ortho, "date": iso_day(0), "status": "Upcoming", "reminder_status": "Queued", "note": "Knee mobility review"},
+        {"display_id": "FU-2103", "patient_display": "PT-2045", "dept": "skin", "doc": doc_skin, "date": iso_day(-2), "status": "Overdue", "reminder_status": "Not sent", "note": "Follow-up pending"},
+        {"display_id": "FU-2104", "patient_display": "PT-2046", "dept": "orthopaedics", "doc": doc_ortho, "date": iso_day(14), "status": "Upcoming", "reminder_status": "Not sent", "note": "Review current symptoms"},
+    ]
+
+    for fu in fu_data:
+        session.add(FollowUp(
+            display_id=fu["display_id"],
+            patient_id=patient_map[fu["patient_display"]].id,
+            department=fu["dept"],
+            doctor_id=fu["doc"].id,
+            date=fu["date"],
+            status=fu["status"],
+            reminder_status=fu["reminder_status"],
+            note=fu["note"],
+        ))
+
+    await session.commit()
+    print("[SUCCESS] Database seeding successfully finished!")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import { createSeedState } from '../../data/seed';
-import type { Appointment, Consultation, Department, DemoState, FollowUp, Invoice, NewAppointmentInput, NewFollowUpInput, NewQueueInput, Patient, PatientDocument, PatientDraft, Payment, PrescriptionItem, Vitals } from '../../types/domain';
+import type { Appointment, Consultation, Department, DemoState, FollowUp, Invoice, NewAppointmentInput, NewFollowUpInput, NewQueueInput, Patient, PatientDocument, PatientDraft, Payment, PrescriptionItem, QueueStatus, Vitals } from '../../types/domain';
+import type { UpdateQueueRequest } from '../api/contracts';
 import { DATA_MODE, requireDemoMode } from '../repositories/mode';
 import { createBrowserDemoDocument } from '../documents/browserDocumentService';
 
@@ -114,6 +115,18 @@ export class DemoHospitalRepository {
     return id;
   }
 
+  updatePatient(id: string, patch: Partial<Patient>): Patient {
+    this.requireDemo();
+    const existing = this.state.patients.find((entry) => entry.id === id);
+    if (!existing) throw new Error(`Patient ${id} not found.`);
+    const updated: Patient = { ...existing, ...patch };
+    this.save({
+      ...this.state,
+      patients: this.state.patients.map((entry) => (entry.id === id ? updated : entry)),
+    });
+    return updated;
+  }
+
   addAppointment(input: NewAppointmentInput): string {
     this.requireDemo();
     if (!this.state.patients.some((patient) => patient.id === input.patientId)) throw new Error('Select a patient that exists in the demo record.');
@@ -148,9 +161,50 @@ export class DemoHospitalRepository {
     this.save({ ...this.state, appointments: this.state.appointments.map((entry) => entry.id === id ? updated : entry), queue, invoices, consultations });
   }
 
-  updateQueueEntry(id: string, status: 'Waiting' | 'Consulting' | 'Completed') {
+  updateQueueEntry(id: string, patch: UpdateQueueRequest | QueueStatus) {
     this.requireDemo();
-    this.save({ ...this.state, queue: this.state.queue.map((entry) => entry.id === id ? { ...entry, status } : entry) });
+    const update = typeof patch === 'string' ? { status: patch } : patch;
+    const currentQueue = this.state.queue.find((e) => e.id === id);
+    if (!currentQueue) return;
+
+    let patients = this.state.patients;
+    if (update.patientPhone || update.patientFullName || update.patientAddress) {
+      patients = patients.map((p) => {
+        if (p.id !== currentQueue.patientId) return p;
+        return {
+          ...p,
+          fullName: update.patientFullName || p.fullName,
+          phone: update.patientPhone || p.phone,
+          address: update.patientAddress || p.address,
+        };
+      });
+    }
+
+    let consultations = this.state.consultations;
+    if (currentQueue.visitId && (update.vitals || update.department)) {
+      consultations = consultations.map((c) => {
+        if (c.id !== currentQueue.visitId) return c;
+        return {
+          ...c,
+          department: update.department || c.department,
+          vitals: update.vitals ? { ...(c.vitals || {}), ...update.vitals } : c.vitals,
+        };
+      });
+    }
+
+    this.save({
+      ...this.state,
+      patients,
+      consultations,
+      queue: this.state.queue.map((entry) => {
+        if (entry.id !== id) return entry;
+        return {
+          ...entry,
+          ...update,
+          vitals: update.vitals ? { ...(entry.vitals || {}), ...update.vitals } : entry.vitals,
+        };
+      }),
+    });
   }
 
   saveConsultation(patientId: string, department: Department, patch: Partial<Consultation>) {
@@ -340,9 +394,21 @@ export class DemoHospitalRepository {
     return followUp.id;
   }
 
-  updateFollowUp(id: string, patch: Partial<FollowUp>) {
+  updateFollowUp(id: string, patch: Partial<FollowUp> & { reminderAction?: string }) {
     this.requireDemo();
-    this.save({ ...this.state, followUps: this.state.followUps.map((entry) => entry.id === id ? { ...entry, ...patch } : entry) });
+    const effectiveReminderStatus = patch.reminderAction === 'send' ? 'Sent' : patch.reminderStatus;
+    this.save({
+      ...this.state,
+      followUps: this.state.followUps.map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              ...patch,
+              ...(effectiveReminderStatus ? { reminderStatus: effectiveReminderStatus } : {}),
+            }
+          : entry
+      ),
+    });
   }
 
   addDocuments(
@@ -434,7 +500,9 @@ export class DemoHospitalRepository {
 
   async uploadDocument(patientId: string, category: string, file: File, visitId?: string, name?: string): Promise<PatientDocument> {
     const doc = await createBrowserDemoDocument(file, patientId, category, name);
-    this.addDocuments(patientId, 'skin', [doc], visitId);
+    const linked = visitId ? this.state.consultations.find((v) => v.id === visitId) : undefined;
+    const dept = linked?.department ?? 'skin';
+    this.addDocuments(patientId, dept, [doc], visitId);
     return doc;
   }
 

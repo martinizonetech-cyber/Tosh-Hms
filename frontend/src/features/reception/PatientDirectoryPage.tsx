@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Clock3,
   Download,
+  Edit2,
   ExternalLink,
   Eye,
   FileText,
@@ -20,7 +21,9 @@ import {
 import { useSearchParams } from 'react-router-dom';
 import type { Patient, PatientDocument } from '../../types/domain';
 import { useHospitalData } from '../../services/mock/DemoProvider';
-import { dateLabel, departmentLabel, downloadFile, money, patientInvoiceTotals, resolveDocumentUrl, resolveInlineDocumentUrl } from '../../utils/format';
+import { useAuth } from '../../services/auth/AuthContext';
+import { dateLabel, departmentLabel, downloadFile, getAge, money, patientInvoiceTotals, resolveDocumentUrl, resolveInlineDocumentUrl } from '../../utils/format';
+import { EditPatientModal } from './EditPatientModal';
 import { matchesPatient } from '../../utils/patientSearch';
 import { useToast } from '../../components/ui/Toast';
 import { PageHeading, PatientAvatar } from '../../components/shared/Primitives';
@@ -37,10 +40,13 @@ type ProfileTab = 'Overview' | 'Appointments' | 'Visit history' | 'Prescriptions
 
 export function PatientDirectoryPage() {
   const { state } = useHospitalData();
+  const { user } = useAuth();
+  const isReception = user?.role === 'reception' || !user;
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState(params.get('q') ?? '');
   const [department, setDepartment] = useState('all');
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [dateFilter, setDateFilter] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [dateMode, setDateMode] = useState<'activity' | 'registered' | 'visit'>('activity');
 
@@ -191,21 +197,46 @@ export function PatientDirectoryPage() {
           <span className="result-count">{matches.length} {matches.length === 1 ? 'patient' : 'patients'}</span>
         </div>
       </div>
-      {matches.length ? <><div className="table-wrap responsive-cards"><table className="data-table"><thead><tr><th className="serial-col">S.No</th><th>Patient</th><th>Phone</th><th>Departments</th><th>Latest visit</th><th>Registered</th><th className="actions-col" style={{ textAlign: 'center', width: 140 }}>Actions</th></tr></thead><tbody>{visible.map((patient, index) => { const serialNo = (page - 1) * pageSize + index + 1; return <tr key={patient.id}><td className="serial-cell">{serialNo}</td><td><button className="patient-link" type="button" onClick={() => setSelectedPatient(patient)}><span className="patient-cell"><PatientAvatar name={patient.fullName} small /><span><strong>{patient.fullName}</strong><span>{patient.id}</span></span></span></button></td><td>{patient.phone}</td><td><div className="department-tags">{patient.departments.map((dept) => <Badge key={dept} tone="info">{dept === 'skin' ? 'Skin' : 'Orthopaedics'}</Badge>)}</div></td><td>{patient.latestVisitAt ? dateLabel(patient.latestVisitAt) : 'No visit yet'}</td><td>{dateLabel(patient.registeredAt)}</td><td className="actions-cell" style={{ textAlign: 'center' }}><Button variant="ghost" size="small" onClick={() => setSelectedPatient(patient)}>View profile</Button></td></tr>; })}</tbody></table></div>
-        <div className="patient-card-list directory-card-list">{visible.map((patient, index) => { const serialNo = (page - 1) * pageSize + index + 1; return <article className="patient-card" key={patient.id}><div className="patient-card-head"><div className="patient-card-name"><span className="serial-cell" style={{ marginRight: 6 }}>#{serialNo}</span><PatientAvatar name={patient.fullName} /><div><strong>{patient.fullName}</strong><span>{patient.id}</span></div></div><Button variant="ghost" size="small" onClick={() => setSelectedPatient(patient)}>Details</Button></div><div className="patient-card-meta"><div><small>Phone</small><strong>{patient.phone}</strong></div><div><small>Latest visit</small><strong>{patient.latestVisitAt ? dateLabel(patient.latestVisitAt) : 'No visit yet'}</strong></div></div><div className="department-tags" style={{ marginTop: 12 }}>{patient.departments.map((dept) => <Badge key={dept} tone="info">{dept === 'skin' ? 'Skin' : 'Orthopaedics'}</Badge>)}</div></article>; })}</div>
+      {matches.length ? <><div className="table-wrap responsive-cards"><table className="data-table"><thead><tr><th className="serial-col">S.No</th><th>Patient</th><th>Phone</th><th>Departments</th><th>Latest visit</th><th>Registered</th><th className="actions-col" style={{ textAlign: 'center', width: 140 }}>Actions</th></tr></thead><tbody>{visible.map((patient, index) => { const serialNo = (page - 1) * pageSize + index + 1; return <tr key={patient.id}><td className="serial-cell">{serialNo}</td><td><button className="patient-link" type="button" onClick={() => setSelectedPatient(patient)}><span className="patient-cell"><PatientAvatar name={patient.fullName} small /><span><strong>{patient.fullName}</strong><span>{patient.id}</span></span></span></button></td><td>{patient.phone}</td><td><div className="department-tags">{patient.departments.map((dept) => <Badge key={dept} tone="info">{dept === 'skin' ? 'Skin' : 'Orthopaedics'}</Badge>)}</div></td><td>{patient.latestVisitAt ? dateLabel(patient.latestVisitAt) : 'No visit yet'}</td><td>{dateLabel(patient.registeredAt)}</td><td className="actions-cell" style={{ textAlign: 'center' }}><div style={{ display: 'inline-flex', gap: 6, justifyContent: 'center' }}><Button variant="ghost" size="small" onClick={() => setSelectedPatient(patient)}>View profile</Button>{isReception && <Button variant="ghost" size="small" onClick={() => setEditingPatient(patient)} icon={<Edit2 size={13} />}>Edit</Button>}</div></td></tr>; })}</tbody></table></div>
+        <div className="patient-card-list directory-card-list">{visible.map((patient, index) => { const serialNo = (page - 1) * pageSize + index + 1; return <article className="patient-card" key={patient.id}><div className="patient-card-head"><div className="patient-card-name"><span className="serial-cell" style={{ marginRight: 6 }}>#{serialNo}</span><PatientAvatar name={patient.fullName} /><div><strong>{patient.fullName}</strong><span>{patient.id}</span></div></div><div style={{ display: 'flex', gap: 6 }}><Button variant="ghost" size="small" onClick={() => setSelectedPatient(patient)}>Details</Button>{isReception && <Button variant="ghost" size="small" onClick={() => setEditingPatient(patient)} icon={<Edit2 size={13} />}>Edit</Button>}</div></div><div className="patient-card-meta"><div><small>Phone</small><strong>{patient.phone}</strong></div><div><small>Latest visit</small><strong>{patient.latestVisitAt ? dateLabel(patient.latestVisitAt) : 'No visit yet'}</strong></div></div><div className="department-tags" style={{ marginTop: 12 }}>{patient.departments.map((dept) => <Badge key={dept} tone="info">{dept === 'skin' ? 'Skin' : 'Orthopaedics'}</Badge>)}</div></article>; })}</div>
         <TablePagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={setPageSize} />
       </> : <EmptyState title="No patients found" message="Try another search term or choose a different date filter." icon={<UserRound size={18} />} action={dateFilter ? <Button size="small" onClick={() => { setDateFilter(''); setPage(1); }}>Show all dates</Button> : undefined} />}
     </Card>
-    <ProfileModal patient={selectedPatient} onClose={() => setSelectedPatient(null)} />
+    <ProfileModal
+      patient={selectedPatient}
+      onClose={() => setSelectedPatient(null)}
+      onPatientUpdated={(updated) => setSelectedPatient(updated)}
+    />
+    <EditPatientModal
+      open={Boolean(editingPatient)}
+      patient={editingPatient}
+      onClose={() => setEditingPatient(null)}
+      onSuccess={(updated) => {
+        if (selectedPatient?.id === updated.id) {
+          setSelectedPatient(updated);
+        }
+      }}
+    />
   </>;
 }
 
-function ProfileModal({ patient, onClose }: { patient: Patient | null; onClose: () => void }) {
+function ProfileModal({
+  patient,
+  onClose,
+  onPatientUpdated,
+}: {
+  patient: Patient | null;
+  onClose: () => void;
+  onPatientUpdated?: (updated: Patient) => void;
+}) {
   const { state, repository } = useHospitalData();
+  const { user } = useAuth();
+  const isReception = user?.role === 'reception' || !user;
   const toast = useToast();
   const [tab, setTab] = useState<ProfileTab>('Overview');
   const [previewDoc, setPreviewDoc] = useState<PatientDocument | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   useEffect(() => { if (patient) setTab('Overview'); }, [patient?.id]);
   if (!patient) return null;
@@ -239,20 +270,45 @@ function ProfileModal({ patient, onClose }: { patient: Patient | null; onClose: 
   return <>
     <Modal open title={patient.fullName} subtitle={`${patient.id} · Registered ${dateLabel(patient.registeredAt)}`} onClose={onClose} wide>
       <div className="profile-intro">
-        <PatientAvatar name={patient.fullName} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <strong style={{ fontSize: 16, fontWeight: 700, color: 'var(--navy)' }}>{patient.fullName}</strong>
-          <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-            {patient.gender} · {patient.dateOfBirth ? `${new Date().getFullYear() - new Date(patient.dateOfBirth).getFullYear()} years` : 'Age not recorded'} · {patient.phone}
-          </span>
-          <div className="department-tags" style={{ marginTop: 4 }}>
-            {patient.departments.map((dept) => <Badge key={dept} tone="info">{departmentLabel(dept)}</Badge>)}
+        <div className="profile-intro-main">
+          <PatientAvatar name={patient.fullName} />
+          <div className="profile-intro-details">
+            <strong>{patient.fullName}</strong>
+            <span>
+              {patient.gender} · {patient.dateOfBirth ? `${new Date().getFullYear() - new Date(patient.dateOfBirth).getFullYear()} years` : 'Age not recorded'} · {patient.phone}
+            </span>
+            <div className="department-tags" style={{ marginTop: 4 }}>
+              {patient.departments.map((dept) => <Badge key={dept} tone="info">{departmentLabel(dept)}</Badge>)}
+            </div>
           </div>
         </div>
+        {isReception && (
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() => setShowEditModal(true)}
+            icon={<Edit2 size={13} />}
+          >
+            Edit profile
+          </Button>
+        )}
       </div>
       <Tabs idPrefix="profile" ariaLabel="Patient profile sections" items={tabs.map((label) => ({ id: label, label: label === 'Prescriptions & Documents' ? `Prescriptions & Docs (${patientDocs.length})` : label }))} selected={tab} onChange={setTab} />
       <TabPanel idPrefix="profile" selected={tab} className="profile-tab-panel">
-        {tab === 'Overview' && <div className="profile-grid"><div className="profile-info"><span>Patient ID</span><strong>{patient.id}</strong></div><div className="profile-info"><span>Phone</span><strong>{patient.phone}</strong></div><div className="profile-info"><span>Email</span><strong>{patient.email || 'Not provided'}</strong></div><div className="profile-info"><span>Address</span><strong>{patient.address}</strong></div><div className="profile-info"><span>Emergency contact</span><strong>{patient.emergencyContact || 'Not provided'}</strong></div><div className="profile-info"><span>Latest visit</span><strong>{patient.latestVisitAt ? formatDistanceToNow(new Date(patient.latestVisitAt), { addSuffix: true }) : 'No visits yet'}</strong></div></div>}
+        {tab === 'Overview' && (
+          <div className="profile-grid">
+            <div className="profile-info"><span>Patient ID</span><strong>{patient.id}</strong></div>
+            <div className="profile-info"><span>Full Name</span><strong>{patient.fullName}</strong></div>
+            <div className="profile-info"><span>Phone</span><strong>{patient.phone}</strong></div>
+            <div className="profile-info"><span>Date of Birth</span><strong>{patient.dateOfBirth || 'Not recorded'} {patient.dateOfBirth ? `(${getAge(patient.dateOfBirth)} yrs)` : ''}</strong></div>
+            <div className="profile-info"><span>Gender</span><strong>{patient.gender}</strong></div>
+            <div className="profile-info"><span>Email</span><strong>{patient.email || 'Not provided'}</strong></div>
+            <div className="profile-info"><span>Address</span><strong>{patient.address}</strong></div>
+            <div className="profile-info"><span>Emergency contact</span><strong>{patient.emergencyContact || 'Not provided'}</strong></div>
+            <div className="profile-info"><span>Enrolled departments</span><strong>{patient.departments.map(d => departmentLabel(d)).join(', ')}</strong></div>
+            <div className="profile-info"><span>Latest visit</span><strong>{patient.latestVisitAt ? formatDistanceToNow(new Date(patient.latestVisitAt), { addSuffix: true }) : 'No visits yet'}</strong></div>
+          </div>
+        )}
         {tab === 'Appointments' && <HistoryList items={appointments.map((item) => ({ title: dateLabel(item.startsAt, 'd MMM yyyy · h:mm a'), detail: `${departmentLabel(item.department)} · ${item.visitType} · ${item.doctor}`, status: item.status }))} empty="No appointments recorded for this patient." />}
         {tab === 'Visit history' && (visits.length ? (
           <div className="profile-history">
@@ -395,8 +451,24 @@ function ProfileModal({ patient, onClose }: { patient: Patient | null; onClose: 
         {tab === 'Invoices and payments' && (invoices.length ? invoices.map((invoice) => { const totals = patientInvoiceTotals(invoice); return <div className="list-row" key={invoice.id}><div className="list-row-main"><strong>{invoice.id} · {money(totals.total)}</strong><span>{invoice.visitLabel} · {dateLabel(invoice.date)}</span></div><div className="profile-payment"><Badge tone={statusTone(totals.status)}>{totals.status}</Badge><small>{money(totals.balance)} balance</small></div></div>; }) : <EmptyState title="No invoices" message="Billing records will appear here after a visit is created." icon={<Wallet size={18} />} />)}
         {tab === 'Follow-ups' && <HistoryList items={followups.map((item) => ({ title: dateLabel(item.date), detail: `${departmentLabel(item.department)} · ${item.doctor} · Reminder ${item.reminderStatus}`, status: item.status }))} empty="No follow-ups recorded." />}
       </TabPanel>
-      <div className="profile-modal-actions"><Button variant="secondary" size="small" onClick={() => { navigator.clipboard?.writeText(patient.id).then(() => toast.push('Patient ID copied.')).catch(() => toast.push(patient.id, 'info')); }}>Copy patient ID</Button><Button variant="primary" size="small" onClick={() => window.print()} icon={<FileText size={14} />}>Print profile</Button></div>
+      <div className="profile-modal-actions">
+        <Button variant="secondary" size="small" onClick={() => { navigator.clipboard?.writeText(patient.id).then(() => toast.push('Patient ID copied.')).catch(() => toast.push(patient.id, 'info')); }}>
+          Copy patient ID
+        </Button>
+        <Button variant="primary" size="small" onClick={() => window.print()} icon={<FileText size={14} />}>
+          Print profile
+        </Button>
+      </div>
     </Modal>
+
+    <EditPatientModal
+      open={showEditModal}
+      patient={patient}
+      onClose={() => setShowEditModal(false)}
+      onSuccess={(updated) => {
+        onPatientUpdated?.(updated);
+      }}
+    />
 
     {/* Preview Modal for selected document */}
     {previewDoc && (

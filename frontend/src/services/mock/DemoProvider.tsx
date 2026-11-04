@@ -2,12 +2,13 @@ import { createContext, useContext, useMemo, useSyncExternalStore, type PropsWit
 import { ApiDataContext, ApiProvider } from '../api/ApiProvider';
 import { DATA_MODE } from '../repositories/mode';
 import { demoRepository } from './demoRepository';
+import type { WsStatus } from '../api/websocketClient';
 
 const DataContext = createContext<ReturnType<typeof useDataValue> | null>(null);
 
 function useDataValue() {
   const state = useSyncExternalStore(demoRepository.subscribe, demoRepository.getSnapshot, demoRepository.getSnapshot);
-  return useMemo(() => ({ state, repository: demoRepository, mode: DATA_MODE }), [state]);
+  return useMemo(() => ({ state, repository: demoRepository, mode: DATA_MODE, wsStatus: 'connected' as WsStatus }), [state]);
 }
 
 export function DemoProvider({ children }: PropsWithChildren) {

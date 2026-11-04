@@ -164,6 +164,18 @@ async def create_follow_up(
 
     await db.commit()
     await db.refresh(fu)
+
+    try:
+        from app.core.websocket import manager as ws_manager
+        await ws_manager.broadcast("FOLLOWUP_CREATED", {
+            "id": fu.display_id,
+            "status": fu.status,
+            "date": fu.date,
+            "department": fu.department,
+        })
+    except Exception:
+        pass
+
     return to_followup_response(fu)
 
 
@@ -188,6 +200,8 @@ async def update_follow_up(
         fu.date = payload.date
     if payload.note is not None:
         fu.note = payload.note
+    if payload.reminder_status is not None:
+        fu.reminder_status = payload.reminder_status
 
     # Reminder Actions
     if payload.reminder_action == "queue":
@@ -233,4 +247,16 @@ async def update_follow_up(
 
     await db.commit()
     await db.refresh(fu)
+
+    try:
+        from app.core.websocket import manager as ws_manager
+        await ws_manager.broadcast("FOLLOWUP_CREATED", {
+            "id": fu.display_id,
+            "status": fu.status,
+            "date": fu.date,
+            "department": fu.department,
+        })
+    except Exception:
+        pass
+
     return to_followup_response(fu)

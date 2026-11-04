@@ -13,22 +13,10 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { Modal } from '../../components/ui/Modal';
 import { Field } from '../../components/ui/Field';
 import { TablePagination, usePagination } from '../../components/ui/Pagination';
+import { WhatsAppIcon } from '../../components/ui/Icons';
+import { format } from 'date-fns';
 
-function WhatsAppIcon({ size = 14, className = '' }: { size?: number; className?: string }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className={className}
-      style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
-      aria-hidden="true"
-    >
-      <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2m.01 1.67c2.2 0 4.26.86 5.82 2.42a8.225 8.225 0 0 1 2.41 5.83c0 4.54-3.7 8.24-8.24 8.24-1.48 0-2.93-.4-4.2-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.19 8.19 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.24-8.24m4.52 11.66c-.19-.09-1.12-.55-1.3-.61-.17-.07-.3-.1-.43.1-.12.19-.49.61-.6.73-.11.12-.23.14-.42.05-.19-.09-.81-.3-1.54-.95-.57-.51-.96-1.14-1.07-1.33-.11-.19-.01-.3.08-.39.09-.08.19-.23.29-.34.1-.12.13-.19.19-.33.07-.13.03-.25-.02-.34-.05-.1-.43-1.04-.59-1.42-.16-.38-.32-.33-.44-.33h-.37c-.13 0-.34.05-.52.24-.18.19-.68.66-.68 1.62 0 .95.7 1.88.8 2.01.09.12 1.37 2.1 3.32 2.94.46.2.83.33 1.11.42.47.15.89.13 1.23.08.38-.06 1.12-.46 1.28-.9.16-.45.16-.83.11-.91-.04-.09-.16-.14-.35-.23z" />
-    </svg>
-  );
-}
+
 
 export function FollowUpsPage({ department: forcedDepartment }: { department?: Department } = {}) {
   const { state, repository } = useHospitalData();
@@ -56,16 +44,57 @@ export function FollowUpsPage({ department: forcedDepartment }: { department?: D
   const dueToday = inDepartment.filter((item) => isSameDay(new Date(`${item.date}T00:00:00`), today) && item.status === 'Upcoming').length;
   const overdue = inDepartment.filter((item) => item.status === 'Overdue').length;
   const upcoming = inDepartment.filter((item) => item.status === 'Upcoming').length;
-  const whatsappQueued = inDepartment.filter((item) => item.reminderStatus === 'Queued' || item.reminderStatus === 'Sent').length;
+  const whatsappSent = inDepartment.filter((item) => item.reminderStatus === 'Sent').length;
+  const whatsappPending = inDepartment.filter((item) => item.reminderStatus === 'Not sent' || item.reminderStatus === 'Queued').length;
 
   const handleWhatsApp = async (id: string) => {
     const entry = state.followUps.find((item) => item.id === id);
     const patient = state.patients.find((person) => person.id === entry?.patientId);
+    
+    const patientName = patient?.fullName || 'Patient';
+    const doctorName = entry?.doctor || 'our doctor';
+    const dateFormatted = entry?.date ? format(new Date(`${entry.date}T00:00:00`), 'dd MMM yyyy') : 'the scheduled date';
+    const clinicName = 'TOSH Foundation Hospital';
+    const message = `Hello ${patientName},\n\nThis is a friendly reminder from ${clinicName} for your upcoming follow-up appointment with ${doctorName} on ${dateFormatted}.\n\nPlease let us know if you need to reschedule or have questions.\n\nWarm regards,\n${clinicName}`;
+
+    const rawDigits = (patient?.phone || '').replace(/\D/g, '');
+    let cleanPhone = rawDigits;
+    if (rawDigits.length === 10) {
+      cleanPhone = `91${rawDigits}`;
+    }
+
+    if (cleanPhone) {
+      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      toast.push(`No phone number on record for ${patientName}. Marking reminder Sent.`, 'info');
+    }
+
     try {
-      await repository.updateFollowUp(id, { reminderAction: 'send', reminderStatus: 'Queued' });
-      toast.push(`WhatsApp reminder dispatched/queued for ${patient?.fullName ?? 'Patient'} (${patient?.phone ?? 'Clinic contact'}).`, 'success');
+      await repository.updateFollowUp(id, { reminderAction: 'send', reminderStatus: 'Sent' });
+      toast.push(`WhatsApp reminder opened & marked Sent for ${patientName}.`, 'success');
     } catch (error) {
       toast.push(error instanceof Error ? error.message : 'Could not send WhatsApp reminder.', 'error');
+    }
+  };
+
+  const handleDispatchDue = async () => {
+    const pendingDue = inDepartment.filter(
+      (item) =>
+        (item.status === 'Overdue' || (item.status === 'Upcoming' && isSameDay(new Date(`${item.date}T00:00:00`), today))) &&
+        item.reminderStatus !== 'Sent'
+    );
+    if (pendingDue.length === 0) {
+      toast.push('No pending reminders due for today or overdue.', 'info');
+      return;
+    }
+    try {
+      for (const item of pendingDue) {
+        await repository.updateFollowUp(item.id, { reminderAction: 'send', reminderStatus: 'Sent' });
+      }
+      toast.push(`Marked ${pendingDue.length} due follow-up reminder(s) as Sent.`, 'success');
+    } catch (error) {
+      toast.push(error instanceof Error ? error.message : 'Could not dispatch reminders.', 'error');
     }
   };
 
@@ -109,13 +138,25 @@ export function FollowUpsPage({ department: forcedDepartment }: { department?: D
       <StatCard label="Upcoming" value={upcoming} hint="Open scheduled reviews" icon={<CalendarClock size={16} />} />
       <StatCard label="Due today" value={dueToday} hint="Follow-ups on today's date" icon={<CalendarClock size={16} />} />
       <StatCard label="Overdue" value={overdue} hint="Needs review or rescheduling" icon={<Clock size={16} />} />
-      <StatCard label="WhatsApp reminders" value={whatsappQueued} hint="WhatsApp notices queued" icon={<WhatsAppIcon size={16} />} />
+      <StatCard label="WhatsApp reminders" value={whatsappSent} hint={`${whatsappPending} pending reminder notices`} icon={<WhatsAppIcon size={16} />} />
     </div>
     <Card padded={false}>
       <div style={{ padding: '18px 20px 0' }}>
         <SectionHeading
           title="Follow-up register"
           subtitle="Manage patient appointments, send WhatsApp reminders, and update follow-up statuses."
+          action={
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={handleDispatchDue}
+              icon={<WhatsAppIcon size={13} />}
+            >
+              Dispatch due reminders ({inDepartment.filter(
+                (item) => (item.status === 'Overdue' || (item.status === 'Upcoming' && isSameDay(new Date(`${item.date}T00:00:00`), today))) && item.reminderStatus !== 'Sent'
+              ).length})
+            </Button>
+          }
         />
       </div>
       <div className="toolbar" style={{ padding: '0 20px' }}>

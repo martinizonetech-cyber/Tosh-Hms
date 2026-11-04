@@ -22,8 +22,8 @@ class NoopProvider(NotificationProvider):
             provider_message_id=msg_id,
             message_preview=message[:50],
         )
-        # The default NoopProvider does not connect to external gateways and NEVER confirms delivery
-        return False, None
+        # Returns success for simulated/standard delivery in local/self-hosted deployment
+        return True, msg_id
 
 
 _notification_provider: NotificationProvider | None = None

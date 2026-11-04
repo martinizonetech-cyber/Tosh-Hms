@@ -45,6 +45,7 @@ frontend/dist-ssr/
 *.local
 
 # Testing and linters
+powershell.cmd
 .pytest_cache/
 .coverage
 htmlcov/

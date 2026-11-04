@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import (
@@ -12,6 +12,7 @@ from app.core.errors import (
     VisitLockedException,
 )
 from app.core.tokens import next_display_id
+from app.core.websocket import broadcast_event
 from app.db.session import get_db
 from app.modules.appointments.models import Appointment
 from app.modules.audit.service import log_audit_event
@@ -111,9 +112,28 @@ async def build_consultation_response(
         for rx in rx_items
     ]
 
-    # 3. Documents & Prescription Images
+    # 3. Documents & Prescription Images - strictly scoped to this visit and department
     storage_service = get_storage_service()
-    doc_stmt = select(Document).where(Document.patient_id == visit.patient_id, Document.deleted_at.is_(None)).order_by(Document.uploaded_at.desc())
+    doc_stmt = (
+        select(Document)
+        .outerjoin(Visit, Document.visit_id == Visit.id)
+        .outerjoin(User, Document.uploaded_by == User.id)
+        .where(
+            Document.patient_id == visit.patient_id,
+            Document.deleted_at.is_(None),
+            or_(
+                Document.visit_id == visit.id,
+                and_(
+                    Document.visit_id.is_(None),
+                    or_(
+                        User.role == visit.department,
+                        User.department == visit.department,
+                    ),
+                ),
+            ),
+        )
+        .order_by(Document.uploaded_at.desc())
+    )
     doc_res = await db.execute(doc_stmt)
     docs = doc_res.scalars().all()
 
@@ -207,6 +227,8 @@ async def list_visits(
     dept = None
     if current_user.role in ("skin", "orthopaedics"):
         dept = current_user.role
+    elif getattr(current_user, "department", None) in ("skin", "orthopaedics"):
+        dept = current_user.department
     elif department and department.lower() in ("skin", "orthopaedics"):
         dept = department.lower()
 
@@ -460,15 +482,14 @@ async def save_consultation(
     except Exception:
         pass
 
-    # Link any unlinked documents for this patient to this visit
-    from app.modules.documents.models import Document
-    from sqlalchemy import update
+    # Auto-link unlinked documents uploaded by this doctor for this patient to this visit
     await db.execute(
         update(Document)
         .where(
             Document.patient_id == visit.patient_id,
             Document.visit_id.is_(None),
             Document.deleted_at.is_(None),
+            Document.uploaded_by == current_user.id,
         )
         .values(visit_id=visit.id)
     )
@@ -487,6 +508,12 @@ async def save_consultation(
 
     await db.commit()
     await db.refresh(consultation)
+
+    await broadcast_event("VISIT_UPDATE", {
+        "action": "consultation_saved",
+        "id": visit.display_id,
+        "status": consultation.status,
+    })
 
     return await build_consultation_response(db, visit, consultation)
 
@@ -555,6 +582,11 @@ async def update_vitals(
 
     await db.commit()
     await db.refresh(v_rec)
+
+    await broadcast_event("VISIT_UPDATE", {
+        "action": "vitals_updated",
+        "id": visit.display_id,
+    })
 
     return VitalsSchema(
         blood_pressure=v_rec.blood_pressure,

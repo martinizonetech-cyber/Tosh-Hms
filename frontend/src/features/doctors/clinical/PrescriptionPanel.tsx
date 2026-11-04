@@ -1,7 +1,9 @@
 import { useRef, useState, useMemo, useEffect } from 'react';
+import { format, isValid, parseISO } from 'date-fns';
 import {
   AlertCircle,
   Bone,
+  Calendar,
   Camera,
   Check,
   CheckSquare,
@@ -35,6 +37,43 @@ import { createPrescriptionImage, isImageFile } from '../../../services/document
 import { useHospitalData } from '../../../services/mock/DemoProvider';
 import { DATA_MODE } from '../../../services/repositories/mode';
 import { dateLabel, downloadFile, fetchPdfBlobUrl, resolveDocumentUrl, resolveInlineDocumentUrl } from '../../../utils/format';
+
+interface UploadDateGroup<T> {
+  dateKey: string;
+  label: string;
+  items: T[];
+}
+
+function groupByUploadDate<T extends { uploadedAt?: string }>(
+  items?: T[],
+  fallbackDate?: string
+): UploadDateGroup<T>[] {
+  if (!items || items.length === 0) return [];
+  const map = new Map<string, { dateKey: string; label: string; items: T[] }>();
+
+  items.forEach((item) => {
+    const raw = item.uploadedAt || fallbackDate || new Date().toISOString();
+    let dateKey = 'other';
+    let label = 'Uploaded Files';
+    try {
+      const d = typeof raw === 'string' ? parseISO(raw) : new Date(raw);
+      if (isValid(d)) {
+        dateKey = format(d, 'yyyy-MM-dd');
+        label = format(d, 'd MMMM yyyy');
+      }
+    } catch {
+      dateKey = 'other';
+      label = 'Uploaded Files';
+    }
+
+    if (!map.has(dateKey)) {
+      map.set(dateKey, { dateKey, label, items: [] });
+    }
+    map.get(dateKey)!.items.push(item);
+  });
+
+  return Array.from(map.values()).sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+}
 
 type PrescriptionMode = 'manual' | 'upload' | 'templates';
 
@@ -255,7 +294,6 @@ export function PrescriptionPanel({
   // PDF Preview Blob generator to guarantee cross-browser inline rendering
   useEffect(() => {
     let active = true;
-    let createdBlobUrl: string | null = null;
 
     if (!previewImage) {
       setPdfPreviewBlobUrl(null);
@@ -285,9 +323,6 @@ export function PrescriptionPanel({
           if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
           return;
         }
-        if (url && url.startsWith('blob:')) {
-          createdBlobUrl = url;
-        }
         setPdfPreviewBlobUrl(url);
         setPdfLoading(false);
       } catch (err) {
@@ -304,9 +339,6 @@ export function PrescriptionPanel({
 
     return () => {
       active = false;
-      if (createdBlobUrl) {
-        URL.revokeObjectURL(createdBlobUrl);
-      }
     };
   }, [previewImage]);
 
@@ -1532,17 +1564,46 @@ export function PrescriptionPanel({
               </div>
             </div>
 
-            {/* Uploaded Files Grid */}
+            {/* Uploaded Files Grid (Grouped & Separated by Upload Date) */}
             {prescriptionImages.length > 0 && (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
-                  gap: 12,
-                  marginTop: 14,
-                }}
-              >
-                {prescriptionImages.map((img, idx) => {
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginTop: 14 }}>
+                {groupByUploadDate(prescriptionImages).map((group) => (
+                  <div key={group.dateKey} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {/* Dashed Date Separator Bar */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 2px' }}>
+                      <div style={{ flex: 1, borderTop: '1px dashed #CBD5E1' }} />
+                      <span
+                        style={{
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          color: '#334155',
+                          background: '#F8FAFC',
+                          border: '1px solid #CBD5E1',
+                          padding: '3px 12px',
+                          borderRadius: 16,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+                        }}
+                      >
+                        <Calendar size={13} color="#0D9488" />
+                        <span>{group.label}</span>
+                        <span style={{ fontSize: 10.5, color: '#64748B', fontWeight: 600 }}>
+                          ({group.items.length} {group.items.length === 1 ? 'file' : 'files'})
+                        </span>
+                      </span>
+                      <div style={{ flex: 1, borderTop: '1px dashed #CBD5E1' }} />
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
+                        gap: 12,
+                      }}
+                    >
+                      {group.items.map((img, idx) => {
                   const isPdf = img.mimeType === 'application/pdf' || img.name.toLowerCase().endsWith('.pdf');
                   const isImg =
                     img.mimeType?.startsWith('image/') ||
@@ -1704,7 +1765,10 @@ export function PrescriptionPanel({
                       </div>
                     </div>
                   );
-                })}
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -2209,9 +2273,9 @@ export function PrescriptionPanel({
                         <span>Could not prepare inline preview directly ({pdfLoadError}). Falling back to direct URL.</span>
                       </div>
                     )}
-                    <object
-                      data={pdfPreviewBlobUrl || resolveInlineDocumentUrl(previewImage)}
-                      type="application/pdf"
+                    <iframe
+                      src={pdfPreviewBlobUrl || resolveInlineDocumentUrl(previewImage)}
+                      title={previewImage.name}
                       className="prescription-preview-pdf"
                       style={{
                         width: 'min(900px, 90vw)',
@@ -2220,25 +2284,7 @@ export function PrescriptionPanel({
                         border: '1px solid #CBD5E1',
                         background: '#FFFFFF',
                       }}
-                    >
-                      <iframe
-                        src={pdfPreviewBlobUrl || resolveInlineDocumentUrl(previewImage)}
-                        className="prescription-preview-pdf"
-                        title={`Preview of ${previewImage.name}`}
-                        style={{ width: '100%', height: '100%', border: 'none', background: '#FFFFFF' }}
-                      >
-                        <div style={{ padding: 32, textAlign: 'center', background: '#F8FAFC', borderRadius: 8 }}>
-                          <FileText size={42} color="#DC2626" style={{ marginBottom: 10 }} />
-                          <strong style={{ display: 'block', fontSize: 14 }}>Inline PDF Viewer Not Available</strong>
-                          <p style={{ fontSize: 12.5, color: '#64748B', marginTop: 4, marginBottom: 14 }}>
-                            Your browser does not support embedding this PDF inline. You can open or download the PDF file directly.
-                          </p>
-                          <Button variant="primary" onClick={() => handleDownload(previewImage)} icon={<Download size={14} />}>
-                            Download PDF
-                          </Button>
-                        </div>
-                      </iframe>
-                    </object>
+                    />
                   </>
                 )
               ) : isImg ? (

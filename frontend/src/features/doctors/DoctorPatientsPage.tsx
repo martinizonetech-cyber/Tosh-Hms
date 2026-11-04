@@ -171,14 +171,12 @@ export function DoctorPatientsPage({ department }: { department: Department }) {
               <tbody>
                 {paginatedRows.map((patient, index) => {
                   const sno = (page - 1) * pageSize + index + 1;
-                  const visit = state.consultations.find((item) => item.patientId === patient.id && item.department === department);
+                  const deptVisits = state.consultations
+                    .filter((item) => item.patientId === patient.id && item.department === department)
+                    .sort((a, b) => b.visitedAt.localeCompare(a.visitedAt));
+                  const latestDeptVisit = deptVisits[0];
                   const matchingVisit = selectedDate
-                    ? state.consultations.find(
-                        (item) =>
-                          item.patientId === patient.id &&
-                          item.department === department &&
-                          isSameISODate(item.visitedAt, selectedDate)
-                      )
+                    ? deptVisits.find((item) => isSameISODate(item.visitedAt, selectedDate))
                     : null;
                   return (
                     <tr key={patient.id}>
@@ -191,13 +189,13 @@ export function DoctorPatientsPage({ department }: { department: Department }) {
                           <span style={{ color: 'var(--teal)', fontWeight: 600 }}>
                             {dateLabel(matchingVisit.visitedAt)}
                           </span>
-                        ) : patient.latestVisitAt ? (
-                          dateLabel(patient.latestVisitAt)
+                        ) : latestDeptVisit ? (
+                          dateLabel(latestDeptVisit.visitedAt)
                         ) : (
                           'No visit yet'
                         )}
                       </td>
-                      <td><Badge tone={visit?.status === 'Finalized' ? 'success' : 'neutral'}>{visit?.status ?? 'No consultation'}</Badge></td>
+                      <td><Badge tone={latestDeptVisit?.status === 'Finalized' ? 'success' : 'neutral'}>{latestDeptVisit?.status ?? 'No consultation'}</Badge></td>
                       <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                         <Button
                           variant="secondary"

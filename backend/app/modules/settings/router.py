@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppException
+from app.core.websocket import broadcast_event
 from app.db.session import get_db
 from app.modules.audit.service import log_audit_event
 from app.modules.auth.dependencies import get_current_user, require_role
@@ -77,6 +78,8 @@ async def update_department_fee(
 
     await db.commit()
     await db.refresh(fee_setting)
+
+    await broadcast_event("FEE_UPDATE", {"department": dept})
 
     # Return full fee configuration
     return await get_fee_settings(db, current_user)

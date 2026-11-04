@@ -139,18 +139,24 @@ class LocalStorageService(StorageService):
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     async def put_object(self, key: str, data: bytes, content_type: str) -> None:
-        target_path = self.base_dir / key
+        clean_key = Path(key).name
+        target_path = self.base_dir / clean_key
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(data)
 
     async def get_object(self, key: str) -> tuple[bytes, str]:
-        target_path = self.base_dir / key
+        clean_key = Path(key).name
+        target_path = self.base_dir / clean_key
         if not target_path.exists():
             for ext in (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".txt", ".doc", ".docx"):
-                alt = self.base_dir / f"{key}{ext}"
+                alt = self.base_dir / f"{clean_key}{ext}"
                 if alt.exists():
                     target_path = alt
                     break
+        if not target_path.exists() and "." in clean_key:
+            alt_stem = self.base_dir / Path(clean_key).stem
+            if alt_stem.exists():
+                target_path = alt_stem
         if not target_path.exists():
             raise FileNotFoundError(f"File {key} not found.")
         data = target_path.read_bytes()
@@ -170,45 +176,57 @@ class LocalStorageService(StorageService):
             ".doc": "application/msword",
             ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         }.get(ext, "application/octet-stream")
+
+        # Fallback inspection from magic bytes if octet-stream
+        if mime == "application/octet-stream" and len(data) >= 4:
+            if data.startswith(b"%PDF-") or b"%PDF-" in data[:1024]:
+                mime = "application/pdf"
+            elif data.startswith(b"\xff\xd8"):
+                mime = "image/jpeg"
+            elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+                mime = "image/png"
+            elif data.startswith(b"RIFF") and len(data) >= 12 and data[8:12] == b"WEBP":
+                mime = "image/webp"
+
         return data, mime
 
     async def delete_object(self, key: str) -> bool:
-        target_path = self.base_dir / key
+        clean_key = Path(key).name
+        target_path = self.base_dir / clean_key
         if target_path.exists():
             target_path.unlink()
             return True
         return False
 
     def get_signed_url(self, key: str, expires_seconds: int = 86400 * 7) -> str:
+        clean_key = Path(key).name
         expiry = int(time.time()) + expires_seconds
-        payload = f"{key}:{expiry}".encode()
-        signature = hmac.new(settings.JWT_SECRET_KEY.encode(), payload, hashlib.sha256).hexdigest()
+        payload = f"{clean_key}:{expiry}".encode()
+        secret = (settings.JWT_SECRET_KEY or "tosh-secret-signing-key").encode()
+        signature = hmac.new(secret, payload, hashlib.sha256).hexdigest()
         # Return URL relative to API root
-        return f"/api/v1/documents/files/{key}?expires={expiry}&sig={signature}"
+        return f"/api/v1/documents/files/{clean_key}?expires={expiry}&sig={signature}"
 
     def verify_signed_url(self, key: str, expires: int, signature: str) -> bool:
         if time.time() > expires:
             return False
+        clean_key = Path(key).name
+        secret = (settings.JWT_SECRET_KEY or "tosh-secret-signing-key").encode()
+
         # Direct check
-        payload = f"{key}:{expires}".encode()
-        expected = hmac.new(settings.JWT_SECRET_KEY.encode(), payload, hashlib.sha256).hexdigest()
+        payload = f"{clean_key}:{expires}".encode()
+        expected = hmac.new(secret, payload, hashlib.sha256).hexdigest()
         if hmac.compare_digest(signature, expected):
             return True
 
-        # Check with candidate extensions (when URL extension was stripped to avoid IDM hijack)
-        for ext in (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
-            alt_key = f"{key}{ext}"
-            alt_payload = f"{alt_key}:{expires}".encode()
-            alt_expected = hmac.new(settings.JWT_SECRET_KEY.encode(), alt_payload, hashlib.sha256).hexdigest()
-            if hmac.compare_digest(signature, alt_expected):
+        # Check with candidate extensions and stem variations
+        stem = Path(clean_key).stem
+        candidates = [stem] + [f"{stem}{ext}" for ext in (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")]
+        for cand in candidates:
+            cand_payload = f"{cand}:{expires}".encode()
+            cand_expected = hmac.new(secret, cand_payload, hashlib.sha256).hexdigest()
+            if hmac.compare_digest(signature, cand_expected):
                 return True
-            # Also check if key had extension but signature was computed without extension
-            if key.endswith(ext):
-                base_key = key[:-len(ext)]
-                base_payload = f"{base_key}:{expires}".encode()
-                base_expected = hmac.new(settings.JWT_SECRET_KEY.encode(), base_payload, hashlib.sha256).hexdigest()
-                if hmac.compare_digest(signature, base_expected):
-                    return True
         return False
 
 

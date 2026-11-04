@@ -1,18 +1,21 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictException, ForbiddenException, NotFoundException
+from app.core.websocket import broadcast_event
 from app.core.tokens import next_display_id
 from app.db.session import get_db
+from app.modules.audit.service import log_audit_event
 from app.modules.auth.dependencies import get_current_user, require_role
 from app.modules.patients.models import Patient
 from app.modules.patients.schemas import (
     CreatePatientRequest,
     PaginatedPatientsResponse,
     PatientResponse,
+    UpdatePatientRequest,
 )
 from app.modules.users.models import User
 from app.modules.visits.models import Visit
@@ -162,6 +165,12 @@ async def create_patient(
     await db.commit()
     await db.refresh(patient)
 
+    await broadcast_event("PATIENT_UPDATE", {
+        "action": "create",
+        "id": patient.display_id,
+        "name": patient.full_name,
+    })
+
     return to_patient_response(patient, [payload.department.lower()])
 
 
@@ -185,6 +194,79 @@ async def get_patient(
         raise ForbiddenException("Clinicians cannot access patient records from other departments.")
 
     return to_patient_response(patient, depts)
+
+
+@router.patch("/{patient_id}", response_model=PatientResponse, summary="Update patient details")
+async def update_patient(
+    patient_id: str,
+    payload: UpdatePatientRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_reception),
+) -> PatientResponse:
+    patient = await find_patient_by_id(db, patient_id)
+    if not patient:
+        raise NotFoundException(f"Patient with ID {patient_id} not found.")
+
+    # Check for duplicate phone if phone is being changed
+    if payload.phone and payload.phone != patient.phone:
+        existing = await db.execute(
+            select(Patient).where(Patient.phone == payload.phone, Patient.id != patient.id)
+        )
+        if existing.scalar_one_or_none():
+            raise ConflictException(f"A patient with phone number {payload.phone} already exists.")
+
+    if payload.full_name is not None:
+        patient.full_name = payload.full_name
+    if payload.date_of_birth is not None:
+        patient.date_of_birth = payload.date_of_birth
+    if payload.gender is not None:
+        patient.gender = payload.gender
+    if payload.phone is not None:
+        patient.phone = payload.phone
+    if payload.email is not None:
+        patient.email = payload.email
+    if payload.address is not None:
+        patient.address = payload.address
+    if payload.emergency_contact is not None:
+        patient.emergency_contact = payload.emergency_contact
+
+    # Load patient departments from visits
+    vis_stmt = select(Visit.department).where(Visit.patient_id == patient.id).distinct()
+    vis_res = await db.execute(vis_stmt)
+    depts = set(vis_res.scalars().all())
+    if payload.departments:
+        for d in payload.departments:
+            depts.add(d.lower())
+
+    await log_audit_event(
+        db=db,
+        action="PATIENT_UPDATE",
+        entity_type="Patient",
+        entity_id=patient.display_id,
+        actor_user_id=current_user.id,
+        patient_id=patient.id,
+        after_state={
+            "fullName": patient.full_name,
+            "phone": patient.phone,
+            "gender": patient.gender,
+            "address": patient.address,
+        },
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    await db.commit()
+    await db.refresh(patient)
+
+    await broadcast_event("PATIENT_UPDATE", {
+        "action": "update",
+        "id": patient.display_id,
+        "name": patient.full_name,
+        "phone": patient.phone,
+    })
+
+    return to_patient_response(patient, list(depts))
 
 
 @router.get("/{patient_id}/visits", summary="Get patient visits")

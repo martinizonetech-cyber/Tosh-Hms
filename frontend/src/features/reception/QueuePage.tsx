@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { format, isSameDay, startOfDay } from 'date-fns';
-import { ArrowLeft, ArrowRight, CalendarDays, Check, Clock3, FileUp, Plus, Search, UserRoundPlus, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Clock3, Edit2, FileUp, Plus, Search, UserRoundPlus, Users } from 'lucide-react';
+import { EditQueueModal } from './EditQueueModal';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -65,6 +66,7 @@ export function QueuePage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [documentQueueEntry, setDocumentQueueEntry] = useState<QueueEntry | null>(null);
+  const [editingQueueEntry, setEditingQueueEntry] = useState<QueueEntry | null>(null);
   const { register, handleSubmit, formState: { errors, isSubmitting }, reset } = useForm({ resolver: zodResolver(patientSchema), defaultValues: defaults });
   const possiblePatients = useMemo(() => state.patients.filter((patient) => matchesPatient(patient, patientSearch)), [state.patients, patientSearch]);
   const filtered = useMemo(() => state.queue.filter((item) => {
@@ -181,6 +183,35 @@ export function QueuePage() {
       }
     }
   });
+  const handleSaveEditQueue = async (updatedData: {
+    id: string;
+    department: Department;
+    doctor: string;
+    visitType: VisitType;
+    status: QueueEntry['status'];
+    note?: string;
+    vitals?: Vitals;
+    patientPhone?: string;
+    patientAddress?: string;
+  }) => {
+    try {
+      await repository.updateQueueEntry(updatedData.id, {
+        department: updatedData.department,
+        doctor: updatedData.doctor,
+        visitType: updatedData.visitType,
+        status: updatedData.status,
+        note: updatedData.note,
+        vitals: updatedData.vitals,
+        patientPhone: updatedData.patientPhone,
+        patientAddress: updatedData.patientAddress,
+      });
+      toast.push('Queue entry updated successfully.', 'success');
+      setEditingQueueEntry(null);
+    } catch (err: any) {
+      toast.push(err?.message || 'Could not update queue entry.', 'error');
+    }
+  };
+
   const setStatus = async (id: string, status: 'Waiting' | 'Consulting' | 'Completed') => {
     try {
       await repository.updateQueueEntry(id, status);
@@ -254,8 +285,8 @@ export function QueuePage() {
       <div style={{ padding: '19px 20px 0' }}><SectionHeading title="Queue overview" subtitle={`${filtered.length} ${filtered.length === 1 ? 'patient' : 'patients'} · demo state is shared with both doctor portals`} /></div>
       <div className="schedule-date-toolbar"><div className="date-navigation"><Button variant="secondary" size="small" aria-label="Previous day" onClick={() => dateMove(-1)} icon={<ArrowLeft size={14} />}>Previous</Button><label className="date-display"><CalendarDays size={15} /><input aria-label="Choose queue date" type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} /><Clock3 size={14} /><strong>{dateLabel(`${dateFilter}T00:00:00`)}</strong></label><Button variant="secondary" size="small" aria-label="Next day" onClick={() => dateMove(1)} icon={<ArrowRight size={14} />}>Next</Button><Button variant="ghost" size="small" onClick={() => setDateFilter(format(new Date(), 'yyyy-MM-dd'))}>Today</Button></div>
         <div className="toolbar"><div className="search-field"><Search size={15} /><input aria-label="Search queue" placeholder="Search patient, phone, ID, or token" value={search} onChange={(event) => setSearch(event.target.value)} /></div><select aria-label="Filter by department" className="select-field" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)}><option value="all">All departments</option><option value="skin">Skin</option><option value="orthopaedics">Orthopaedics</option></select><select aria-label="Filter by doctor" className="select-field" value={doctorFilter} onChange={(event) => setDoctorFilter(event.target.value)}><option value="all">All doctors</option>{allDoctors.map((name) => <option key={name}>{name}</option>)}</select><select aria-label="Filter by status" className="select-field" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option>Waiting</option><option>Consulting</option><option>Completed</option></select><span className="result-count">{filtered.length} {filtered.length === 1 ? 'patient' : 'patients'}</span></div></div>
-      {filtered.length ? <><div className="table-wrap responsive-cards"><table className="data-table"><thead><tr><th className="serial-col">S.No</th><th>Token / patient</th><th>Department & doctor</th><th>Arrival</th><th style={{ textAlign: 'center', width: 110 }}>Status</th><th style={{ textAlign: 'center', width: 110 }}>Payment</th><th className="actions-col" style={{ textAlign: 'right', width: 270, paddingRight: 20 }}>Actions</th></tr></thead><tbody>{pagedItems.map((entry, index) => { const patient = state.patients.find((person) => person.id === entry.patientId); const serialNo = (page - 1) * pageSize + index + 1; const entryVisit = entry.visitId ? state.consultations.find((v) => v.id === entry.visitId) : state.consultations.find((v) => v.patientId === entry.patientId && v.department === entry.department); const docCount = entryVisit?.documents.length ?? 0; return <tr key={entry.id}><td className="serial-cell">{serialNo}</td><td><div className="patient-cell"><span className="queue-token">{entry.token}</span><div><strong>{patient?.fullName ?? 'Patient'}</strong><span>{patient?.id ?? entry.patientId} · {patient?.phone ?? ''}</span></div></div></td><td>{entry.department === 'skin' ? 'Skin' : 'Orthopaedics'}<span className="table-subtext">{entry.doctor}</span></td><td>{new Date(entry.arrivalAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</td><td style={{ textAlign: 'center' }}><Badge tone={statusTone(entry.status)}>{entry.status}</Badge></td><td style={{ textAlign: 'center' }}><Badge tone={statusTone(entry.paymentStatus)}>{entry.paymentStatus}</Badge></td><td className="actions-cell" style={{ textAlign: 'right', paddingRight: 20 }}><div className="table-actions" style={{ justifyContent: 'flex-end', gap: 6 }}>{entry.status === 'Waiting' && <Button variant="secondary" size="small" style={{ minWidth: 76, justifyContent: 'center' }} onClick={() => setStatus(entry.id, 'Consulting')}>Call in</Button>}{entry.status === 'Consulting' && <Button variant="secondary" size="small" style={{ minWidth: 76, justifyContent: 'center' }} onClick={() => setStatus(entry.id, 'Completed')}>Complete</Button>}<Button variant={docCount > 0 ? 'secondary' : 'ghost'} size="small" style={{ minWidth: 88, justifyContent: 'center' }} onClick={() => setDocumentQueueEntry(entry)} icon={<FileUp size={14} />} title="Upload prescription or patient documents">{docCount > 0 ? `Docs (${docCount})` : 'Upload'}</Button><Button variant="ghost" size="small" style={{ minWidth: 68, justifyContent: 'center' }} onClick={() => navigate('/reception/billing')}>Billing</Button></div></td></tr>; })}</tbody></table></div>
-        <div className="patient-card-list queue-card-list">{pagedItems.map((entry, index) => { const patient = state.patients.find((person) => person.id === entry.patientId); const serialNo = (page - 1) * pageSize + index + 1; const entryVisit = entry.visitId ? state.consultations.find((v) => v.id === entry.visitId) : state.consultations.find((v) => v.patientId === entry.patientId && v.department === entry.department); const docCount = entryVisit?.documents.length ?? 0; return <article className="patient-card" key={entry.id}><div className="patient-card-head"><div className="patient-card-name"><span className="serial-cell" style={{ marginRight: 6 }}>#{serialNo}</span><PatientAvatar name={patient?.fullName ?? 'Patient'} /><div><strong>{patient?.fullName ?? 'Patient'}</strong><span>{entry.token} · {patient?.id}</span></div></div><Badge tone={statusTone(entry.status)}>{entry.status}</Badge></div><div className="patient-card-meta"><div><small>Department / Doctor</small><strong>{entry.department === 'skin' ? 'Skin' : 'Orthopaedics'} · {entry.doctor}</strong></div><div><small>Arrival / Payment</small><strong>{new Date(entry.arrivalAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} · {entry.paymentStatus}</strong></div></div><div className="button-row" style={{ marginTop: 12 }}>{entry.status === 'Waiting' && <Button variant="secondary" size="small" onClick={() => setStatus(entry.id, 'Consulting')}>Call in</Button>}{entry.status === 'Consulting' && <Button variant="secondary" size="small" onClick={() => setStatus(entry.id, 'Completed')}>Complete</Button>}<Button variant={docCount > 0 ? 'secondary' : 'ghost'} size="small" onClick={() => setDocumentQueueEntry(entry)} icon={<FileUp size={14} />}>{docCount > 0 ? `Docs (${docCount})` : 'Upload docs'}</Button><Button variant="ghost" size="small" onClick={() => navigate('/reception/billing')}>Billing</Button></div></article>; })}</div>
+      {filtered.length ? <><div className="table-wrap responsive-cards"><table className="data-table"><thead><tr><th className="serial-col">S.No</th><th>Token / patient</th><th>Department & doctor</th><th>Arrival</th><th style={{ textAlign: 'center', width: 110 }}>Status</th><th style={{ textAlign: 'center', width: 110 }}>Payment</th><th className="actions-col" style={{ textAlign: 'right', width: 330, paddingRight: 20 }}>Actions</th></tr></thead><tbody>{pagedItems.map((entry, index) => { const patient = state.patients.find((person) => person.id === entry.patientId); const serialNo = (page - 1) * pageSize + index + 1; const entryVisit = entry.visitId ? state.consultations.find((v) => v.id === entry.visitId) : state.consultations.find((v) => v.patientId === entry.patientId && v.department === entry.department); const docCount = entryVisit?.documents.length ?? 0; return <tr key={entry.id}><td className="serial-cell">{serialNo}</td><td><div className="patient-cell"><span className="queue-token">{entry.token}</span><div><strong>{patient?.fullName ?? 'Patient'}</strong><span>{patient?.id ?? entry.patientId} · {patient?.phone ?? ''}</span></div></div></td><td>{entry.department === 'skin' ? 'Skin' : 'Orthopaedics'}<span className="table-subtext">{entry.doctor}</span></td><td>{new Date(entry.arrivalAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</td><td style={{ textAlign: 'center' }}><Badge tone={statusTone(entry.status)}>{entry.status}</Badge></td><td style={{ textAlign: 'center' }}><Badge tone={statusTone(entry.paymentStatus)}>{entry.paymentStatus}</Badge></td><td className="actions-cell" style={{ textAlign: 'right', paddingRight: 20 }}><div className="table-actions" style={{ justifyContent: 'flex-end', gap: 6 }}>{entry.status === 'Waiting' && <Button variant="secondary" size="small" style={{ minWidth: 76, justifyContent: 'center' }} onClick={() => setStatus(entry.id, 'Consulting')}>Call in</Button>}{entry.status === 'Consulting' && <Button variant="secondary" size="small" style={{ minWidth: 76, justifyContent: 'center' }} onClick={() => setStatus(entry.id, 'Completed')}>Complete</Button>}<Button variant="ghost" size="small" style={{ minWidth: 64, justifyContent: 'center' }} onClick={() => setEditingQueueEntry(entry)} icon={<Edit2 size={13} />}>Edit</Button><Button variant={docCount > 0 ? 'secondary' : 'ghost'} size="small" style={{ minWidth: 88, justifyContent: 'center' }} onClick={() => setDocumentQueueEntry(entry)} icon={<FileUp size={14} />} title="Upload prescription or patient documents">{docCount > 0 ? `Docs (${docCount})` : 'Upload'}</Button><Button variant="ghost" size="small" style={{ minWidth: 68, justifyContent: 'center' }} onClick={() => navigate('/reception/billing')}>Billing</Button></div></td></tr>; })}</tbody></table></div>
+        <div className="patient-card-list queue-card-list">{pagedItems.map((entry, index) => { const patient = state.patients.find((person) => person.id === entry.patientId); const serialNo = (page - 1) * pageSize + index + 1; const entryVisit = entry.visitId ? state.consultations.find((v) => v.id === entry.visitId) : state.consultations.find((v) => v.patientId === entry.patientId && v.department === entry.department); const docCount = entryVisit?.documents.length ?? 0; return <article className="patient-card" key={entry.id}><div className="patient-card-head"><div className="patient-card-name"><span className="serial-cell" style={{ marginRight: 6 }}>#{serialNo}</span><PatientAvatar name={patient?.fullName ?? 'Patient'} /><div><strong>{patient?.fullName ?? 'Patient'}</strong><span>{entry.token} · {patient?.id}</span></div></div><Badge tone={statusTone(entry.status)}>{entry.status}</Badge></div><div className="patient-card-meta"><div><small>Department / Doctor</small><strong>{entry.department === 'skin' ? 'Skin' : 'Orthopaedics'} · {entry.doctor}</strong></div><div><small>Arrival / Payment</small><strong>{new Date(entry.arrivalAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} · {entry.paymentStatus}</strong></div></div><div className="button-row" style={{ marginTop: 12 }}>{entry.status === 'Waiting' && <Button variant="secondary" size="small" onClick={() => setStatus(entry.id, 'Consulting')}>Call in</Button>}{entry.status === 'Consulting' && <Button variant="secondary" size="small" onClick={() => setStatus(entry.id, 'Completed')}>Complete</Button>}<Button variant="secondary" size="small" onClick={() => setEditingQueueEntry(entry)} icon={<Edit2 size={13} />}>Edit</Button><Button variant={docCount > 0 ? 'secondary' : 'ghost'} size="small" onClick={() => setDocumentQueueEntry(entry)} icon={<FileUp size={14} />}>{docCount > 0 ? `Docs (${docCount})` : 'Upload docs'}</Button><Button variant="ghost" size="small" onClick={() => navigate('/reception/billing')}>Billing</Button></div></article>; })}</div>
         <TablePagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={setPageSize} />
       </> : <EmptyState title="No queue entries match" message="Change a filter or add a patient to the queue to get started." icon={<Clock3 size={18} />} action={<Button size="small" onClick={() => setFlow('existing')}>Add existing patient</Button>} />}
     </Card>
@@ -265,6 +296,14 @@ export function QueuePage() {
       patient={state.patients.find((p) => p.id === documentQueueEntry?.patientId) ?? null}
       queueEntry={documentQueueEntry}
       department={documentQueueEntry?.department}
+    />
+    <EditQueueModal
+      open={Boolean(editingQueueEntry)}
+      onClose={() => setEditingQueueEntry(null)}
+      entry={editingQueueEntry}
+      patient={state.patients.find((p) => p.id === editingQueueEntry?.patientId) ?? null}
+      doctors={doctors}
+      onSave={handleSaveEditQueue}
     />
   </>;
 }

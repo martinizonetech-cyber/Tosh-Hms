@@ -42,7 +42,7 @@ export function LoginPage() {
   const [selectedRole, setSelectedRole] = useState<PortalRole>('reception');
   const [doctors, setDoctors] = useState<DoctorRecord[]>([]);
   const isMock = DATA_MODE === 'mock';
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState('reception@gmail.com');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -64,7 +64,7 @@ export function LoginPage() {
   const handleRoleSelect = (role: RoleOption) => {
     setSelectedRole(role.id);
     if (role.id === 'reception') {
-      setEmail('');
+      setEmail('reception@gmail.com');
     } else {
       const match = doctors.find((d) => d.department === role.id);
       setEmail(match?.email || '');

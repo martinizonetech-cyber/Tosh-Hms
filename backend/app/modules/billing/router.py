@@ -14,6 +14,7 @@ from app.core.errors import (
     PaymentExceedsBalanceException,
 )
 from app.core.tokens import next_display_id
+from app.core.websocket import broadcast_event
 from app.db.session import get_db
 from app.modules.audit.service import log_audit_event
 from app.modules.auth.dependencies import get_current_user, require_role
@@ -105,6 +106,18 @@ def compute_invoice_math(
     return total_rupees, paid_rupees, balance_rupees, inv_status
 
 
+def serialize_charge(charge: InvoiceCharge, department: str = "all") -> ChargeItemResponse:
+    return ChargeItemResponse(
+        id=charge.display_id,
+        description=charge.description,
+        amount=round(charge.amount / 100.0, 2),
+        department=department,
+        added_by=charge.added_by,
+        date=charge.created_at.strftime("%Y-%m-%d"),
+        created_at=charge.created_at.isoformat(),
+    )
+
+
 def to_invoice_response(invoice: Invoice) -> InvoiceResponse:
     charges = invoice.charges or []
     payments = invoice.payments or []
@@ -125,6 +138,7 @@ def to_invoice_response(invoice: Invoice) -> InvoiceResponse:
             department=invoice.department,
             added_by=c.added_by,
             date=c.created_at.strftime("%Y-%m-%d"),
+            created_at=c.created_at.isoformat(),
         )
         for c in charges
     ]
@@ -307,6 +321,7 @@ async def record_payment(
         )
 
         await db.commit()
+        await broadcast_event("BILLING_UPDATE", {"action": "payment", "invoiceId": invoice.display_id})
 
         return PaymentResponse(
             id=payment.display_id,
@@ -373,6 +388,7 @@ async def record_refund(
         )
 
         await db.commit()
+        await broadcast_event("BILLING_UPDATE", {"action": "payment", "invoiceId": invoice.display_id})
 
         return RefundResponse(
             id=refund.display_id,
@@ -447,6 +463,7 @@ async def add_visit_charge(
     )
 
     await db.commit()
+    await broadcast_event("BILLING_UPDATE", {"action": "charge_added", "invoiceId": invoice.display_id})
     await db.refresh(charge)
 
     return ChargeItemResponse(
@@ -513,6 +530,7 @@ async def add_invoice_charge(
     )
 
     await db.commit()
+    await broadcast_event("BILLING_UPDATE", {"action": "charge_added", "invoiceId": invoice.display_id})
     await db.refresh(charge)
 
     return ChargeItemResponse(
@@ -545,10 +563,11 @@ async def update_invoice(
 
     if payload.consultation_fee is not None:
         if payload.consultation_fee < 0:
-            raise BadRequestException("Consultation fee cannot be negative.")
+            raise AppException("Consultation fee cannot be negative.", status_code=400)
         invoice.consultation_fee = int(round(payload.consultation_fee * 100))
 
     await db.commit()
+    await broadcast_event("BILLING_UPDATE", {"action": "charge_added", "invoiceId": invoice.display_id})
     await db.refresh(invoice)
     return to_invoice_response(invoice)
 
@@ -582,6 +601,7 @@ async def delete_invoice_payment(
 
     await db.delete(payment)
     await db.commit()
+    await broadcast_event("BILLING_UPDATE", {"action": "charge_added", "invoiceId": invoice.display_id})
 
 
 @router.patch("/invoices/{invoice_id}/charges/{charge_id}", response_model=ChargeItemResponse, summary="Update charge on invoice")
@@ -615,8 +635,9 @@ async def update_invoice_charge(
     charge.description = payload.description.strip()
     charge.amount = int(round(payload.amount * 100))
     await db.commit()
+    await broadcast_event("BILLING_UPDATE", {"action": "charge_added", "invoiceId": invoice.display_id})
     await db.refresh(charge)
-    return serialize_charge(charge)
+    return serialize_charge(charge, invoice.department)
 
 
 @router.delete("/invoices/{invoice_id}/charges/{charge_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete charge from invoice")
@@ -665,6 +686,7 @@ async def delete_invoice_charge(
     )
 
     await db.commit()
+    await broadcast_event("BILLING_UPDATE", {"action": "charge_added", "invoiceId": invoice.display_id})
     return None
 
 

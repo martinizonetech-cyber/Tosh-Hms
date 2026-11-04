@@ -64,7 +64,6 @@ export function PatientDocumentsModal({
 
   useEffect(() => {
     let active = true;
-    let createdUrl: string | null = null;
 
     if (!preview) {
       setPdfPreviewBlobUrl(null);
@@ -93,9 +92,6 @@ export function PatientDocumentsModal({
           if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
           return;
         }
-        if (url && url.startsWith('blob:')) {
-          createdUrl = url;
-        }
         setPdfPreviewBlobUrl(url);
         setPdfLoading(false);
       })
@@ -109,9 +105,6 @@ export function PatientDocumentsModal({
 
     return () => {
       active = false;
-      if (createdUrl) {
-        URL.revokeObjectURL(createdUrl);
-      }
     };
   }, [preview]);
 
@@ -120,8 +113,10 @@ export function PatientDocumentsModal({
   const department: Department =
     propDepartment ?? queueEntry?.department ?? patient.departments[0] ?? 'skin';
 
-  // Find all consultations for this patient
-  const patientConsultations = state.consultations.filter((c) => c.patientId === patient.id);
+  // Find consultations for this patient (scoped to propDepartment if provided)
+  const patientConsultations = state.consultations.filter(
+    (c) => c.patientId === patient.id && (!propDepartment || c.department === propDepartment)
+  );
 
   // Identify current visit if opened for a queue entry
   const queueVisit = queueEntry?.visitId
@@ -134,6 +129,7 @@ export function PatientDocumentsModal({
   // Attach visit info for context
   const allDocuments: Array<PatientDocument & { visitId: string; visitDate: string; isCurrentVisit: boolean }> = [];
   for (const consultation of patientConsultations) {
+    if (propDepartment && consultation.department !== propDepartment) continue;
     const isCurrent = currentVisitId ? consultation.id === currentVisitId : consultation.department === department;
     for (const doc of consultation.documents) {
       allDocuments.push({
@@ -653,23 +649,17 @@ export function PatientDocumentsModal({
                   </div>
                 )}
                 {pdfPreviewBlobUrl ? (
-                  <object
-                    data={pdfPreviewBlobUrl}
-                    type="application/pdf"
-                    style={{ width: '100%', height: '100%', border: 'none', borderRadius: '6px', background: '#FFFFFF' }}
-                  >
-                    <iframe
-                      src={pdfPreviewBlobUrl}
-                      title={`Preview of ${preview.name}`}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        border: 'none',
-                        borderRadius: '6px',
-                        background: '#FFFFFF',
-                      }}
-                    />
-                  </object>
+                  <iframe
+                    src={pdfPreviewBlobUrl || resolveInlineDocumentUrl(preview)}
+                    title={`Preview of ${preview.name}`}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      border: 'none',
+                      borderRadius: '6px',
+                      background: '#FFFFFF',
+                    }}
+                  />
                 ) : !pdfLoading && (
                   <div
                     style={{

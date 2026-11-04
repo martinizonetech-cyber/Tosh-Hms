@@ -44,6 +44,48 @@ class CreatePatientRequest(CamelModel):
         return v.strip()
 
 
+class UpdatePatientRequest(CamelModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=60)
+    date_of_birth: str | None = None
+    gender: GenderType | None = None
+    phone: str | None = Field(default=None, min_length=7, max_length=13)
+    email: str | None = Field(default=None, max_length=80)
+    address: str | None = Field(default=None, min_length=4, max_length=150)
+    emergency_contact: str | None = Field(default=None, max_length=60)
+    departments: list[str] | None = None
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned.isdigit():
+            raise ValueError("Phone number must contain numbers only.")
+        if len(cleaned) < 7 or len(cleaned) > 13:
+            raise ValueError("Phone number must be between 7 and 13 digits.")
+        return cleaned
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if cleaned == "":
+            return None
+        if "@" not in cleaned or "." not in cleaned:
+            raise ValueError("Enter a valid email address.")
+        return cleaned
+
+    @field_validator("full_name", "address")
+    @classmethod
+    def trim_strings(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.strip()
+
+
 class PatientResponse(CamelModel):
     id: str  # display_id e.g. PT-1001
     full_name: str
